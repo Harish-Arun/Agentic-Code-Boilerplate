@@ -1,0 +1,15 @@
+# Shared Package Dependencies
+
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pyyaml>=6.0
+
+# Database adapters
+aiosqlite>=0.19.0
+asyncpg>=0.29.0
+motor>=3.3.0
+
+# LLM providers (optional - install as needed)
+# google-generativeai>=0.3.0
+# openai>=1.10.0
+# pillow>=10.0.0

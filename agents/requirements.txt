@@ -1,0 +1,26 @@
+# Agents Service Dependencies
+
+# FastAPI
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# LangGraph & LangChain
+langgraph>=0.2.0
+langchain>=0.2.0
+langchain-core>=0.2.0
+
+# Checkpointing backends
+langgraph-checkpoint>=1.0.0
+# langgraph-checkpoint-postgres>=1.0.0  # Uncomment for production
+
+# LLM providers (optional - install as needed)
+# google-generativeai>=0.3.0  # For Gemini
+# openai>=1.10.0              # For OpenAI/Azure
+
+# HTTP client (for MCP calls)
+httpx>=0.26.0
+
+# Config & validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pyyaml>=6.0

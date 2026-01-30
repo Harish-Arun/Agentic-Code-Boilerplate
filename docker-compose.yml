@@ -1,0 +1,122 @@
+services:
+  # ============================================
+  # Frontend - OPS Portal
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      - VITE_API_URL=http://localhost:${API_PORT:-8000}
+    depends_on:
+      - api-service
+    networks:
+      - nnp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # API Service - FastAPI
+  # ============================================
+  api-service:
+    build:
+      context: .
+      dockerfile: api-service/Dockerfile
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_TYPE=${DATABASE_TYPE:-sqlite}
+      - DATABASE_PATH=/app/data/nnp_ai.db
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - AGENTS_SERVICE_URL=http://agents:8001
+      - MCP_SERVICE_URL=http://mcp-tools:8002
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    depends_on:
+      - agents
+      - mcp-tools
+    networks:
+      - nnp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Agents - LangGraph
+  # ============================================
+  agents:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    ports:
+      - "${AGENTS_PORT:-8001}:8001"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - MCP_SERVICE_URL=http://mcp-tools:8002
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      - mcp-tools
+    networks:
+      - nnp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MCP Tools - FastMCP
+  # ============================================
+  mcp-tools:
+    build:
+      context: .
+      dockerfile: mcp-tools/Dockerfile
+    ports:
+      - "${MCP_PORT:-8002}:8002"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./config:/app/config:ro
+    networks:
+      - nnp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Redis (Optional - uncomment if needed)
+  # ============================================
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - nnp-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+networks:
+  nnp-network:
+    driver: bridge
+
+volumes:
+  data:

@@ -1,0 +1,146 @@
+# NNP-AI Configuration
+# This file drives all pluggable components
+
+# ============================================
+# Database Configuration
+# ============================================
+database:
+  type: "sqlite"  # Options: sqlite, postgres, mongo
+  
+  # SQLite settings
+  sqlite:
+    path: "./data/nnp_ai.db"
+  
+  # PostgreSQL settings  
+  postgres:
+    host: "${POSTGRES_HOST:-localhost}"
+    port: ${POSTGRES_PORT:-5432}
+    database: "${POSTGRES_DB:-nnp_ai}"
+    user: "${POSTGRES_USER:-admin}"
+    password: "${POSTGRES_PASSWORD:-}"
+  
+  # MongoDB settings
+  mongo:
+    uri: "${MONGO_URI:-mongodb://localhost:27017/nnp_ai}"
+
+# ============================================
+# LLM Configuration
+# ============================================
+llm:
+  provider: "mock"  # Options: mock, gemini, openai, azure
+  
+  mock:
+    delay_ms: 100  # Simulate processing time
+  
+  gemini:
+    api_key: "${GEMINI_API_KEY:-}"
+    model: "gemini-1.5-pro"
+    temperature: 0.1
+    max_tokens: 4096
+  
+  openai:
+    api_key: "${OPENAI_API_KEY:-}"
+    model: "gpt-4"
+    temperature: 0.1
+  
+  azure:
+    endpoint: "${AZURE_OPENAI_ENDPOINT:-}"
+    api_key: "${AZURE_OPENAI_API_KEY:-}"
+    deployment: "${AZURE_OPENAI_DEPLOYMENT:-}"
+    api_version: "2024-02-15-preview"
+
+# ============================================
+# Agent Configuration
+# ============================================
+agents:
+  enabled:
+    - extraction
+    - signature_detection
+    - verification
+  
+  retry:
+    max_attempts: 3
+    backoff_seconds: 1
+  
+  checkpointing:
+    enabled: true
+    backend: "memory"  # Options: memory, redis, postgres
+
+# ============================================
+# MCP Tools Configuration
+# ============================================
+mcp:
+  server:
+    host: "0.0.0.0"
+    port: 8002
+    transport: "sse"  # Options: sse, http, stdio
+  
+  tools:
+    enabled:
+      - ocr
+      - pdf_utils  
+      - signature_provider
+    
+    # Tool-specific settings
+    ocr:
+      provider: "mock"  # Options: mock, gemini, tesseract
+    
+    pdf_utils:
+      max_pages: 50
+      dpi: 300
+    
+    signature_provider:
+      cache_enabled: true
+      cache_ttl_seconds: 3600
+
+# ============================================
+# Prompts (Easily Swappable)
+# ============================================
+prompts:
+  extraction: |
+    You are a document extraction specialist. Extract the following payment fields from the document:
+    - Creditor name and account
+    - Debtor name and account  
+    - Amount and currency
+    - Payment type
+    - Date
+    Return as structured JSON with confidence scores.
+  
+  signature_detection: |
+    Analyze this document image and identify all signature regions.
+    Return bounding boxes as [x1, y1, x2, y2] coordinates.
+  
+  signature_verification: |
+    Compare the extracted signature with the reference signature.
+    Analyze stroke patterns, consistency, and visual similarity.
+    Return match status, confidence score (0-1), and reasoning.
+
+# ============================================
+# Document Lifecycle States
+# ============================================
+document_states:
+  - INGESTED
+  - PROCESSING
+  - EXTRACTED
+  - VERIFIED
+  - REVIEWED
+  - CONFIRMED
+  - REJECTED
+
+# ============================================
+# Feature Flags
+# ============================================
+features:
+  human_in_loop: true
+  signature_verification: true
+  auto_extraction: true
+  audit_logging: true
+  retry_on_failure: true
+
+# ============================================
+# Logging
+# ============================================
+logging:
+  level: "${LOG_LEVEL:-INFO}"
+  format: "json"  # Options: json, text
+  include_timestamp: true
