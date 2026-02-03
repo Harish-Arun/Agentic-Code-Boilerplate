@@ -9,9 +9,12 @@ langgraph>=0.2.0
 langchain>=0.2.0
 langchain-core>=0.2.0
 
-# Checkpointing backends
+# Checkpointing (for persistence)
 langgraph-checkpoint>=1.0.0
-# langgraph-checkpoint-postgres>=1.0.0  # Uncomment for production
+# langgraph-checkpoint-postgres>=1.0.0 # Uncomment for Postgres support
+
+# MCP Client
+mcp>=1.0.0
 
 # LLM providers (optional - install as needed)
 # google-generativeai>=0.3.0  # For Gemini

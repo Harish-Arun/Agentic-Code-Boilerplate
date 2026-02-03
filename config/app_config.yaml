@@ -9,7 +9,7 @@ database:
   
   # SQLite settings
   sqlite:
-    path: "./data/nnp_ai.db"
+    path: "${DATA_DIR:-./data}/nnp_ai.db"
   
   # PostgreSQL settings  
   postgres:

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 
 import sys
+import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
@@ -103,19 +104,38 @@ async def upload_document(
     """
     Upload a document file.
     
-    In production, this would save the file to object storage.
-    For the boilerplate, we mock the file handling.
+    Saves the file to local storage. In production, this would save to S3/GCS/Azure Blob.
     """
+    import aiofiles
+    
     db = request.app.state.db
     
-    # Mock file storage - in production, save to S3/GCS/Azure Blob
-    mock_file_path = f"/data/uploads/{file.filename}"
+    # Ensure uploads directory exists
+    default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    data_dir = Path(os.environ.get("DATA_DIR", str(default_data_dir)))
+    upload_dir = data_dir / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save the uploaded file
+    file_path = upload_dir / file.filename
+    try:
+        async with aiofiles.open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                await f.write(chunk)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+    
+    # Store as a stable path within the mounted /data volume
+    saved_file_path = f"{data_dir.as_posix()}/uploads/{file.filename}"
     
     doc_data = {
         "source": source,
         "uploaded_by": uploaded_by,
         "status": "INGESTED",
-        "raw_file_path": mock_file_path,
+        "raw_file_path": saved_file_path,
         "extracted_data": {},
         "signature_result": {}
     }

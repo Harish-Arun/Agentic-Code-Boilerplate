@@ -13,12 +13,30 @@ class ApiService {
     async request(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint}`
 
+        const isFormData = options.body instanceof FormData
+        const headers = {
+            ...(options.headers || {})
+        }
+
+        // Default to JSON, but NEVER force Content-Type for multipart/form-data
+        if (!isFormData) {
+            const hasContentType =
+                Object.keys(headers).some(k => k.toLowerCase() === 'content-type')
+            if (!hasContentType) {
+                headers['Content-Type'] = 'application/json'
+            }
+        } else {
+            // Let the browser set the multipart boundary
+            for (const key of Object.keys(headers)) {
+                if (key.toLowerCase() === 'content-type') {
+                    delete headers[key]
+                }
+            }
+        }
+
         const config = {
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            },
-            ...options
+            ...options,
+            headers
         }
 
         try {
@@ -57,7 +75,7 @@ class ApiService {
         const formData = new FormData()
         formData.append('file', file)
 
-        // Remove content-type header to let browser set boundary for multipart/form-data
+        // Let the browser set boundary for multipart/form-data
         return this.request('/documents/upload', {
             method: 'POST',
             body: formData,

@@ -5,6 +5,7 @@ Provides tools for converting PDFs to images, cropping regions, etc.
 """
 from typing import Dict, Any, List
 from fastmcp import FastMCP
+import os
 
 import sys
 from pathlib import Path
@@ -38,12 +39,13 @@ def register_pdf_tools(mcp: FastMCP, config: AppConfig):
         max_pages = pdf_config.get("max_pages", 50)
         actual_dpi = min(dpi, pdf_config.get("dpi", 300))
         
+        data_dir = os.environ.get("DATA_DIR", "/data")
         # Mock implementation
         return {
             "success": True,
             "images": [
-                f"/data/images/{Path(pdf_path).stem}_page_1.png",
-                f"/data/images/{Path(pdf_path).stem}_page_2.png"
+                f"{Path(data_dir).as_posix()}/images/{Path(pdf_path).stem}_page_1.png",
+                f"{Path(data_dir).as_posix()}/images/{Path(pdf_path).stem}_page_2.png"
             ],
             "page_count": 2,
             "dpi": actual_dpi,
@@ -72,7 +74,8 @@ def register_pdf_tools(mcp: FastMCP, config: AppConfig):
             Path to the cropped image
         """
         if output_path is None:
-            output_path = f"/data/crops/{Path(image_path).stem}_crop.png"
+            data_dir = os.environ.get("DATA_DIR", "/data")
+            output_path = f"{Path(data_dir).as_posix()}/crops/{Path(image_path).stem}_crop.png"
         
         # Mock implementation
         return {

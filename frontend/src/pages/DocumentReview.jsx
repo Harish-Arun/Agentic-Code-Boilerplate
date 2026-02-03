@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 // Mock document data
 const MOCK_DOCUMENT = {
     id: 'DOC-001',
@@ -184,29 +186,26 @@ function DocumentReview() {
                         minHeight: '500px',
                         background: 'var(--color-bg-tertiary)'
                     }}>
-                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="1">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="16" y1="13" x2="8" y2="13" />
-                            <line x1="16" y1="17" x2="8" y2="17" />
-                            <polyline points="10 9 9 9 8 9" />
-                        </svg>
-                        <p style={{ marginTop: 'var(--spacing-md)', color: 'var(--color-text-muted)' }}>
-                            PDF Preview
-                        </p>
-                        <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                            {document.raw_file_path}
-                        </p>
-                        <p style={{
-                            marginTop: 'var(--spacing-lg)',
-                            padding: 'var(--spacing-md)',
-                            background: 'var(--color-bg)',
-                            borderRadius: 'var(--radius-md)',
-                            fontSize: '0.75rem',
-                            color: 'var(--color-text-secondary)'
-                        }}>
-                            [In production, PDF.js viewer would render here]
-                        </p>
+                        <iframe
+                            src={`${API_BASE_URL}/static/uploads/${document.raw_file_path.split('/').pop()}`}
+                            style={{
+                                width: '100%',
+                                height: '600px',
+                                border: 'none',
+                                borderRadius: 'var(--radius-md)'
+                            }}
+                            title="Document Preview"
+                        />
+                        <div style={{ marginTop: 'var(--spacing-md)', textAlign: 'center' }}>
+                            <a
+                                href={`${API_BASE_URL}/static/uploads/${document.raw_file_path.split('/').pop()}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '0.875rem', color: 'var(--color-primary)' }}
+                            >
+                                Open in new tab
+                            </a>
+                        </div>
                     </div>
                 </div>
 

@@ -26,4 +26,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8002/health || exit 1
 
 # Run the application with FastMCP's built-in HTTP server
-CMD ["python", "main.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["python", "main.py", "--transport", "sse", "--host", "0.0.0.0", "--port", "8002"]

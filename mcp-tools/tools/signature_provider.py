@@ -6,6 +6,8 @@ Provides tools to retrieve and store reference signatures for verification.
 from typing import Dict, Any, Optional
 from fastmcp import FastMCP
 from datetime import datetime
+import os
+from pathlib import Path
 
 import sys
 from pathlib import Path
@@ -15,18 +17,20 @@ from config import AppConfig
 
 
 # Mock signature database
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+
 _mock_signatures = {
     "CUST001": {
         "customer_id": "CUST001",
         "customer_name": "John Smith",
-        "signature_image_path": "/data/references/cust001_signature.png",
+        "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/cust001_signature.png",
         "created_at": "2025-01-15T10:00:00Z",
         "verified": True
     },
     "CUST002": {
         "customer_id": "CUST002",
         "customer_name": "Jane Doe",
-        "signature_image_path": "/data/references/cust002_signature.png",
+        "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/cust002_signature.png",
         "created_at": "2025-02-20T14:30:00Z",
         "verified": True
     }
@@ -66,7 +70,7 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
             "signature": {
                 "customer_id": customer_id,
                 "customer_name": f"Customer {customer_id}",
-                "signature_image_path": f"/data/references/default_signature.png",
+                "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/default_signature.png",
                 "created_at": datetime.utcnow().isoformat(),
                 "verified": False
             },

@@ -96,8 +96,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--transport", 
         choices=["http", "sse", "stdio"], 
-        default="http",
-        help="Transport protocol (default: http)"
+        default="sse",
+        help="Transport protocol (default: sse)"
     )
     parser.add_argument(
         "--host",

@@ -32,13 +32,14 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_TYPE=${DATABASE_TYPE:-sqlite}
-      - DATABASE_PATH=/app/data/nnp_ai.db
+      - DATA_DIR=/data
+      - DATABASE_PATH=/data/nnp_ai.db
       - LLM_PROVIDER=${LLM_PROVIDER:-mock}
       - AGENTS_SERVICE_URL=http://agents:8001
       - MCP_SERVICE_URL=http://mcp-tools:8002
     volumes:
       - ./config:/app/config:ro
-      - ./data:/app/data
+      - ./data:/data
     depends_on:
       - agents
       - mcp-tools
@@ -64,8 +65,10 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER:-mock}
       - MCP_SERVICE_URL=http://mcp-tools:8002
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DATA_DIR=/data
     volumes:
       - ./config:/app/config:ro
+      - ./data:/data
     depends_on:
       - mcp-tools
     networks:
@@ -89,8 +92,10 @@ services:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - LLM_PROVIDER=${LLM_PROVIDER:-mock}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DATA_DIR=/data
     volumes:
       - ./config:/app/config:ro
+      - ./data:/data
     networks:
       - nnp-network
     healthcheck:

@@ -7,6 +7,7 @@ Features:
 - Thread-based workflow tracking
 """
 import sys
+import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -27,9 +28,12 @@ from graph.workflow import create_workflow, run_workflow, resume_workflow, get_w
 # ============================================
 # Request/Response Models
 # ============================================
+DEFAULT_DATA_DIR = os.environ.get("DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
+
+
 class RunWorkflowRequest(BaseModel):
     document_id: str
-    document_path: str = "/data/mock_document.pdf"
+    document_path: str = f"{Path(DEFAULT_DATA_DIR).as_posix()}/mock_document.pdf"
     run_extraction: bool = True
     run_signature_verification: bool = True
 
@@ -180,6 +184,8 @@ async def run_agent_workflow(request: RunWorkflowRequest):
             errors=result.extraction_errors + result.detection_errors + result.verification_errors
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

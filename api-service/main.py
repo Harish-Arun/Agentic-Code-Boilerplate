@@ -3,6 +3,7 @@ NNP-AI API Service - FastAPI entry point.
 Config-driven, pluggable architecture.
 """
 import sys
+import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -52,6 +53,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from fastapi.staticfiles import StaticFiles
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +63,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files (ensure directory exists)
+default_data_dir = Path(__file__).resolve().parent.parent / "data"
+data_dir = Path(os.environ.get("DATA_DIR", str(default_data_dir)))
+uploads_dir = data_dir / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(data_dir)), name="static")
 
 # Include routers
 app.include_router(documents.router, prefix="/documents", tags=["Documents"])

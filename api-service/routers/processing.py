@@ -2,6 +2,7 @@
 Processing Router - Trigger agent pipelines for document processing.
 """
 import httpx
+import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
@@ -40,8 +41,8 @@ class ProcessingStatusResponse(BaseModel):
 # ============================================
 async def process_document_async(
     document_id: str,
+    document_path: str,
     db,
-    config,
     run_extraction: bool = True,
     run_signature: bool = True
 ):
@@ -66,6 +67,7 @@ async def process_document_async(
                     f"{agents_url}/run",
                     json={
                         "document_id": document_id,
+                        "document_path": document_path,
                         "run_extraction": run_extraction,
                         "run_signature_verification": run_signature
                     }
@@ -88,10 +90,14 @@ async def process_document_async(
         await asyncio.sleep(1)  # Simulate processing time
         
         mock_extracted = {
-            "creditor": {"name": "ACME Corp", "account": "1234567890", "confidence": 0.95},
-            "debtor": {"name": "John Doe", "account": "0987654321", "confidence": 0.92},
-            "amount": {"value": 10000.00, "currency": "USD", "confidence": 0.98},
-            "payment_type": "wire_transfer"
+            "creditor_name": {"value": "ACME Corporation Ltd", "confidence": 0.95, "source": "ai"},
+            "creditor_account": {"value": "GB29 NWBK 6016 1331 9268 19", "confidence": 0.92, "source": "ai"},
+            "debtor_name": {"value": "John Smith", "confidence": 0.94, "source": "ai"},
+            "debtor_account": {"value": "GB82 WEST 1234 5698 7654 32", "confidence": 0.91, "source": "ai"},
+            "amount": {"value": "15,000.00", "confidence": 0.98, "source": "ai"},
+            "currency": {"value": "GBP", "confidence": 0.99, "source": "ai"},
+            "payment_type": {"value": "CHAPS", "confidence": 0.88, "source": "ai"},
+            "payment_date": {"value": "29/01/2026", "confidence": 0.85, "source": "ai"}
         }
         
         mock_signature = {
@@ -154,11 +160,14 @@ async def process_document(
         )
     
     # Start background processing
+    default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    data_dir = os.environ.get("DATA_DIR", str(default_data_dir))
+    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/mock_document.pdf"
     background_tasks.add_task(
         process_document_async,
         process_request.document_id,
+        document_path,
         db,
-        {"AGENTS_SERVICE_URL": "http://agents:8001"},
         process_request.run_extraction,
         process_request.run_signature_verification
     )
@@ -227,12 +236,16 @@ async def rerun_processing(
     
     run_extraction = step in ["all", "extraction"]
     run_signature = step in ["all", "signature"]
+
+    default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    data_dir = os.environ.get("DATA_DIR", str(default_data_dir))
+    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/mock_document.pdf"
     
     background_tasks.add_task(
         process_document_async,
         document_id,
+        document_path,
         db,
-        {"AGENTS_SERVICE_URL": "http://agents:8001"},
         run_extraction,
         run_signature
     )

@@ -36,6 +36,27 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
         # Use vision if document is an image/PDF
         # For mock, we just use regular generate
         if config.llm.provider == "mock":
+            # Demonstrating MCP Tool Usage
+            # If enabled, validte tool connection and use it
+            try:
+                from mcp_client import get_mcp_client
+                
+                print("🔌 Connecting to MCP Tools for OCR...")
+                async with get_mcp_client() as mcp:
+                    # Call the 'ocr_extract' tool exposed by mcp-tools service
+                    ocr_result = await mcp.call_tool("ocr_extract", arguments={"image_path": state.document_path})
+                    
+                    # Log the result from the tool
+                    print(f"✅ MCP Tool Result: {ocr_result}")
+                    
+                    # Parse tool result if needed, for mock we just use the existing logic below
+                    # but typically you'd populate state.extracted_payment from ocr_result
+            except Exception as e:
+                import traceback
+                print(f"⚠️ MCP Tool Call Failed: {e}")
+                traceback.print_exc()
+                print("   Falling back to internal mock logic.")
+
             # Return mock extracted data
             state.extracted_payment = ExtractedPayment(
                 creditor_name=PaymentField(value="ACME Corporation Ltd", confidence=0.95, source="ai"),

@@ -84,6 +84,16 @@ def create_workflow(config: AppConfig) -> Tuple[StateGraph, Optional[BaseCheckpo
     [End]
     """
     
+    # Define async node wrappers with config
+    async def run_extraction(state):
+        return await extraction_node_wrapper(state, config)
+
+    async def run_signature(state):
+        return await signature_detection_wrapper(state, config)
+
+    async def run_verification(state):
+        return await verification_wrapper(state, config)
+
     # Create the state graph
     graph = StateGraph(AgentState)
     
@@ -92,17 +102,17 @@ def create_workflow(config: AppConfig) -> Tuple[StateGraph, Optional[BaseCheckpo
     
     # Always start with extraction if enabled
     if "extraction" in enabled_agents:
-        graph.add_node("extraction", lambda state: extraction_node_wrapper(state, config))
+        graph.add_node("extraction", run_extraction)
     
     # Add human review node if HITL enabled
     if config.features.human_in_loop:
         graph.add_node("human_review", human_review_node)
     
     if "signature_detection" in enabled_agents:
-        graph.add_node("signature_detection", lambda state: signature_detection_wrapper(state, config))
+        graph.add_node("signature_detection", run_signature)
     
     if "verification" in enabled_agents:
-        graph.add_node("verification", lambda state: verification_wrapper(state, config))
+        graph.add_node("verification", run_verification)
     
     # Define edges based on enabled agents
     if "extraction" in enabled_agents:
@@ -178,50 +188,37 @@ def human_review_node(state: dict) -> dict:
 # ============================================
 # Node Wrappers (sync/async handling)
 # ============================================
-def extraction_node_wrapper(state: dict, config: AppConfig) -> dict:
-    """Sync wrapper for extraction node."""
-    import asyncio
-    
+async def extraction_node_wrapper(state: dict, config: AppConfig) -> dict:
+    """Async wrapper for extraction node."""
     # Convert dict to AgentState if needed
     if isinstance(state, dict):
         agent_state = AgentState(**state)
     else:
         agent_state = state
     
-    # Run async node
-    result = asyncio.get_event_loop().run_until_complete(
-        extraction_node(agent_state, config)
-    )
+    result = await extraction_node(agent_state, config)
     return result.model_dump()
 
 
-def signature_detection_wrapper(state: dict, config: AppConfig) -> dict:
-    """Sync wrapper for signature detection node."""
-    import asyncio
-    
+async def signature_detection_wrapper(state: dict, config: AppConfig) -> dict:
+    """Async wrapper for signature detection node."""
     if isinstance(state, dict):
         agent_state = AgentState(**state)
     else:
         agent_state = state
     
-    result = asyncio.get_event_loop().run_until_complete(
-        signature_detection_node(agent_state, config)
-    )
+    result = await signature_detection_node(agent_state, config)
     return result.model_dump()
 
 
-def verification_wrapper(state: dict, config: AppConfig) -> dict:
-    """Sync wrapper for verification node."""
-    import asyncio
-    
+async def verification_wrapper(state: dict, config: AppConfig) -> dict:
+    """Async wrapper for verification node."""
     if isinstance(state, dict):
         agent_state = AgentState(**state)
     else:
         agent_state = state
     
-    result = asyncio.get_event_loop().run_until_complete(
-        verification_node(agent_state, config)
-    )
+    result = await verification_node(agent_state, config)
     return result.model_dump()
 
 
@@ -257,7 +254,7 @@ async def run_workflow(
         config = {"configurable": {"thread_id": thread_id}}
     
     # Run the graph
-    result = workflow.invoke(initial_state.model_dump(), config)
+    result = await workflow.ainvoke(initial_state.model_dump(), config)
     
     # Convert back to AgentState
     final_state = AgentState(**result)
@@ -286,7 +283,7 @@ async def resume_workflow(
     
     # Resume with optional state updates
     input_state = updated_state if updated_state else None
-    result = workflow.invoke(input_state, config)
+    result = await workflow.ainvoke(input_state, config)
     
     final_state = AgentState(**result)
     final_state.completed_at = datetime.utcnow()

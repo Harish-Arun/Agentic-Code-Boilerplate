@@ -4,6 +4,7 @@ Signature Detection Agent Node - Detect signature regions in documents.
 This node identifies where signatures appear in the document.
 """
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "shared"))
@@ -31,6 +32,7 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
         llm = get_llm_adapter(config)
         
         if config.llm.provider == "mock":
+            data_dir = os.environ.get("DATA_DIR", "/data")
             # Return mock signature detections
             state.signature_detections = [
                 SignatureDetection(
@@ -42,7 +44,7 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
                         page=1
                     ),
                     confidence=0.92,
-                    cropped_image_path="/data/signatures/doc123_sig1.png"
+                    cropped_image_path=f"{Path(data_dir).as_posix()}/signatures/doc123_sig1.png"
                 ),
                 SignatureDetection(
                     bounding_box=BoundingBox(
@@ -53,7 +55,7 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
                         page=1
                     ),
                     confidence=0.88,
-                    cropped_image_path="/data/signatures/doc123_sig2.png"
+                    cropped_image_path=f"{Path(data_dir).as_posix()}/signatures/doc123_sig2.png"
                 )
             ]
         else:
