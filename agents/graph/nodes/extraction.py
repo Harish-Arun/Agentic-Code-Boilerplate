@@ -1,104 +1,181 @@
 """
-Extraction Agent Node - Extract payment fields from documents.
+Extraction Agent Node - Thin orchestrator.
 
-This node uses vision LLM (or mock) to extract structured payment data.
+Delegates ALL business logic to MCP tools:
+  - extract_payment_fields: Gemini Vision + structured extraction
+  - validate_extraction: Business rule validation
+
+This node only manages state transitions, history tracking, and retry logic.
 """
 import sys
+import time
+import json
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "shared"))
 
-from models import AgentState, ExtractedPayment, PaymentField
+from models import (
+    AgentState, ExtractedPayment, PaymentField,
+    ExtractionAttempt
+)
 from config import AppConfig
-from adapters import get_llm_adapter
+from mcp_client import get_mcp_client, call_tool_on_session
 
 
 async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
     """
-    Extract payment fields from the document.
-    
-    This agent:
-    1. Reads the document (PDF/image)
-    2. Uses vision LLM to extract structured fields
-    3. Returns confidence scores for each field
-    
-    In mock mode, returns sample data.
-    In production, calls Gemini Vision.
+    Extract payment fields by calling MCP extraction tools.
+
+    Flow:
+    1. Call MCP extract_payment_fields -> Gemini Vision extraction
+    2. Call MCP validate_extraction -> Challenger validation
+    3. Record attempt + update state
     """
     state.current_step = "extraction"
-    
-    try:
-        llm = get_llm_adapter(config)
-        
-        # Get extraction prompt from config
-        extraction_prompt = config.prompts.extraction
-        
-        # Use vision if document is an image/PDF
-        # For mock, we just use regular generate
-        if config.llm.provider == "mock":
-            # Demonstrating MCP Tool Usage
-            # If enabled, validte tool connection and use it
-            try:
-                from mcp_client import get_mcp_client
-                
-                print("🔌 Connecting to MCP Tools for OCR...")
-                async with get_mcp_client() as mcp:
-                    # Call the 'ocr_extract' tool exposed by mcp-tools service
-                    ocr_result = await mcp.call_tool("ocr_extract", arguments={"image_path": state.document_path})
-                    
-                    # Log the result from the tool
-                    print(f"✅ MCP Tool Result: {ocr_result}")
-                    
-                    # Parse tool result if needed, for mock we just use the existing logic below
-                    # but typically you'd populate state.extracted_payment from ocr_result
-            except Exception as e:
-                import traceback
-                print(f"⚠️ MCP Tool Call Failed: {e}")
-                traceback.print_exc()
-                print("   Falling back to internal mock logic.")
+    state.add_history("extraction", "started", {
+        "document_path": state.document_path
+    }, agent="extraction_agent")
 
-            # Return mock extracted data
-            state.extracted_payment = ExtractedPayment(
-                creditor_name=PaymentField(value="ACME Corporation Ltd", confidence=0.95, source="ai"),
-                creditor_account=PaymentField(value="GB29NWBK60161331926819", confidence=0.92, source="ai"),
-                debtor_name=PaymentField(value="John Smith", confidence=0.94, source="ai"),
-                debtor_account=PaymentField(value="GB82WEST12345698765432", confidence=0.91, source="ai"),
-                amount=PaymentField(value=15000.00, confidence=0.98, source="ai"),
-                currency=PaymentField(value="GBP", confidence=0.99, source="ai"),
-                payment_type=PaymentField(value="CHAPS", confidence=0.88, source="ai"),
-                payment_date=PaymentField(value="2026-01-29", confidence=0.85, source="ai"),
-                charges_account=PaymentField(value="GB82WEST12345698765432", confidence=0.80, source="ai"),
-                raw_ocr_text="[Mock OCR text from document...]"
-            )
-        else:
-            # Production: Use vision LLM
-            result = await llm.generate_structured(
-                prompt=f"{extraction_prompt}\n\nDocument path: {state.document_path}",
-                schema={
-                    "creditor_name": "string",
-                    "creditor_account": "string",
-                    "debtor_name": "string",
-                    "debtor_account": "string",
-                    "amount": "number",
-                    "currency": "string",
-                    "payment_type": "string",
-                    "payment_date": "string"
-                }
-            )
+    start_time = time.time()
+    attempt_number = len(state.extraction_attempts) + 1
+
+    try:
+        print("\n" + "="*80)
+        print("🔌 EXTRACTION NODE - Connecting to MCP")
+        print("="*80)
+        print(f"Document path: {state.document_path}")
+        print("="*80 + "\n")
+        
+        async with get_mcp_client() as mcp:
+            # Step 1: Extract payment fields via MCP
+            state.add_history("extraction", "calling_mcp_extract", {
+                "document_path": state.document_path,
+                "tool": "extract_payment_fields"
+            }, agent="extraction_agent")
+
+            print("✅ MCP connection established, calling extract_payment_fields...\n")
             
-            # Convert to ExtractedPayment model
-            state.extracted_payment = ExtractedPayment(
-                creditor_name=PaymentField(value=result.get("creditor_name", ""), confidence=0.9, source="ai"),
-                creditor_account=PaymentField(value=result.get("creditor_account", ""), confidence=0.9, source="ai"),
-                debtor_name=PaymentField(value=result.get("debtor_name", ""), confidence=0.9, source="ai"),
-                debtor_account=PaymentField(value=result.get("debtor_account", ""), confidence=0.9, source="ai"),
-                amount=PaymentField(value=result.get("amount", 0), confidence=0.9, source="ai"),
-                currency=PaymentField(value=result.get("currency", ""), confidence=0.9, source="ai"),
-                payment_type=PaymentField(value=result.get("payment_type", ""), confidence=0.9, source="ai"),
-                payment_date=PaymentField(value=result.get("payment_date", ""), confidence=0.9, source="ai")
+            extraction_result = await call_tool_on_session(mcp, "extract_payment_fields", {
+                "document_path": state.document_path
+            })
+
+            processing_time = int((time.time() - start_time) * 1000)
+
+            if not extraction_result.get("success"):
+                error_msg = extraction_result.get("error", "Extraction failed")
+                raise RuntimeError(error_msg)
+
+            # Convert response to ExtractedPayment model
+            raw_payment = extraction_result["extracted_payment"]
+            extracted_payment = _convert_mcp_response(raw_payment)
+            model_used = extraction_result.get("model_used", "")
+            
+            # DEBUG: Log extracted fields
+            print("\n" + "="*80)
+            print("💰 EXTRACTION NODE - Fields Extracted")
+            print("="*80)
+            import json
+            print(json.dumps(raw_payment, indent=2, default=str))
+            print(f"\nConverted to model with {_count_fields(extracted_payment)} non-null fields")
+            print("="*80 + "\n")
+
+            # Step 2: Validate extraction via MCP
+            validation_result = await call_tool_on_session(mcp, "validate_extraction", {
+                "extracted_fields": json.dumps(raw_payment)
+            })
+
+            if not validation_result.get("valid", True):
+                state.add_history("extraction", "validation_warning", {
+                    "issues": validation_result.get("issues", [])
+                }, agent="challenger_agent", notes=validation_result.get("notes"))
+
+            # Record successful attempt
+            attempt = ExtractionAttempt(
+                attempt_number=attempt_number,
+                success=True,
+                extracted_payment=extracted_payment,
+                model_used=model_used,
+                processing_time_ms=processing_time,
+                raw_response=str(raw_payment)[:2000]
             )
-    
+            state.add_extraction_attempt(attempt)
+
+            state.add_history("extraction", "completed", {
+                "attempt": attempt_number,
+                "success": True,
+                "fields_extracted": _count_fields(extracted_payment),
+                "processing_time_ms": processing_time
+            }, agent="extraction_agent")
+
     except Exception as e:
-        state.extraction_errors.append(f"Extraction failed: {str(e)}")
-    
+        import traceback
+        processing_time = int((time.time() - start_time) * 1000)
+        error_msg = f"Extraction failed: {str(e)}"
+
+        attempt = ExtractionAttempt(
+            attempt_number=attempt_number,
+            success=False,
+            errors=[error_msg],
+            model_used=config.llm.gemini.model,
+            processing_time_ms=processing_time
+        )
+        state.add_extraction_attempt(attempt)
+        state.add_history("extraction", "failed", {
+            "error": error_msg,
+            "attempt": attempt_number,
+            "traceback": traceback.format_exc()[:1000]
+        }, agent="extraction_agent")
+
+        # Retry logic
+        if state.retry_count < state.max_retries:
+            state.retry_count += 1
+            state.add_history("extraction", "retry_scheduled", {
+                "retry_count": state.retry_count,
+                "max_retries": state.max_retries
+            }, agent="extraction_agent")
+
     return state
+
+
+def _convert_mcp_response(raw: dict) -> ExtractedPayment:
+    """Convert MCP tool response to ExtractedPayment model."""
+    def make_field(data) -> Optional[PaymentField]:
+        if not data or (isinstance(data, dict) and data.get("value") is None):
+            return None
+        if isinstance(data, dict):
+            return PaymentField(
+                value=data.get("value"),
+                confidence=float(data.get("confidence", 0.0)),
+                source="ai",
+                location=data.get("location", "")
+            )
+        return None
+
+    return ExtractedPayment(
+        creditor_name=make_field(raw.get("creditor_name")),
+        creditor_account=make_field(raw.get("creditor_account")),
+        creditor_bank=make_field(raw.get("creditor_bank")),
+        debtor_name=make_field(raw.get("debtor_name")),
+        debtor_account=make_field(raw.get("debtor_account")),
+        debtor_bank=make_field(raw.get("debtor_bank")),
+        amount=make_field(raw.get("amount")),
+        currency=make_field(raw.get("currency")),
+        payment_type=make_field(raw.get("payment_type")),
+        payment_date=make_field(raw.get("payment_date")),
+        charges_account=make_field(raw.get("charges_account")),
+        reference=make_field(raw.get("reference")),
+        raw_ocr_text=raw.get("raw_ocr_text")
+    )
+
+
+def _count_fields(payment: ExtractedPayment) -> int:
+    """Count non-null fields in extracted payment."""
+    count = 0
+    for field_name in ['creditor_name', 'creditor_account', 'creditor_bank',
+                       'debtor_name', 'debtor_account', 'debtor_bank',
+                       'amount', 'currency', 'payment_type', 'payment_date',
+                       'charges_account', 'reference']:
+        if getattr(payment, field_name, None) is not None:
+            count += 1
+    return count

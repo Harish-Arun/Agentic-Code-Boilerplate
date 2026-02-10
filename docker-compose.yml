@@ -34,7 +34,7 @@ services:
       - DATABASE_TYPE=${DATABASE_TYPE:-sqlite}
       - DATA_DIR=/data
       - DATABASE_PATH=/data/nnp_ai.db
-      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - AGENTS_SERVICE_URL=http://agents:8001
       - MCP_SERVICE_URL=http://mcp-tools:8002
     volumes:
@@ -62,7 +62,7 @@ services:
       - "${AGENTS_PORT:-8001}:8001"
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - MCP_SERVICE_URL=http://mcp-tools:8002
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DATA_DIR=/data
@@ -90,7 +90,7 @@ services:
       - "${MCP_PORT:-8002}:8002"
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DATA_DIR=/data
     volumes:

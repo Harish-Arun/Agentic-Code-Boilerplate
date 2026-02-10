@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 
-// Mock data for development
-const MOCK_DOCUMENTS = [
+// Fallback sample data shown when API is unreachable
+const SAMPLE_DOCUMENTS = [
     {
         id: 'DOC-001',
         source: 'manual',
@@ -64,12 +64,12 @@ function DocumentList() {
     const fetchDocuments = async () => {
         setLoading(true)
         try {
-            // Try to fetch from API, fallback to mock data
+            // Try to fetch from API, fallback to sample data
             const response = await api.getDocuments(statusFilter)
-            setDocuments(response.documents || MOCK_DOCUMENTS)
+            setDocuments(response.documents || SAMPLE_DOCUMENTS)
         } catch (err) {
-            console.log('Using mock data:', err.message)
-            setDocuments(MOCK_DOCUMENTS.filter(d =>
+            console.warn('API unavailable, showing sample data:', err.message)
+            setDocuments(SAMPLE_DOCUMENTS.filter(d =>
                 !statusFilter || d.status === statusFilter
             ))
         }
@@ -81,7 +81,7 @@ function DocumentList() {
             await api.processDocument(docId)
             fetchDocuments()
         } catch (err) {
-            // Mock: Update local state
+            // Fallback: Update local state
             setDocuments(prev => prev.map(d =>
                 d.id === docId ? { ...d, status: 'PROCESSING' } : d
             ))
@@ -98,9 +98,9 @@ function DocumentList() {
             fetchDocuments()
         } catch (err) {
             console.error('Upload failed:', err)
-            // Mock: Add to local state if API fails
+            // Fallback: Add to local state if API fails
             const newDoc = {
-                id: `DOC-MOCK-${Date.now()}`,
+                id: `DOC-LOCAL-${Date.now()}`,
                 source: 'manual',
                 uploaded_by: 'current_user',
                 status: 'INGESTED',

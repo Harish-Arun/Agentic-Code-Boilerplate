@@ -29,6 +29,61 @@ from .nodes.signature_detection import signature_detection_node
 from .nodes.verification import verification_node
 
 
+def should_continue_after_extraction(state) -> str:
+    """
+    Decide whether to continue after extraction based on success.
+    
+    Returns:
+        "continue" if extraction succeeded, "end" if it failed
+    """
+    # Handle both dict and AgentState objects
+    if isinstance(state, dict):
+        extraction_attempts = state.get("extraction_attempts", [])
+        extraction_errors = state.get("extraction_errors", [])
+        extracted_payment = state.get("extracted_payment")
+    else:
+        # AgentState object
+        extraction_attempts = state.extraction_attempts
+        extraction_errors = state.extraction_errors
+        extracted_payment = state.extracted_payment
+    
+    # Check if extraction succeeded
+    if extraction_attempts:
+        latest_attempt = extraction_attempts[-1]
+        success = latest_attempt.success if hasattr(latest_attempt, 'success') else latest_attempt.get("success", False)
+        if success:
+            return "continue"
+    
+    # Check for critical errors
+    if extraction_errors:
+        return "end"
+    
+    # No extraction data but no errors - allow continuation (might be optional)
+    return "continue" if extracted_payment else "end"
+
+
+def should_continue_after_detection(state) -> str:
+    """
+    Decide whether to continue to verification based on detection success.
+    
+    Returns:
+        "continue" if signatures were detected, "end" otherwise
+    """
+    # Handle both dict and AgentState objects
+    if isinstance(state, dict):
+        signature_detections = state.get("signature_detections", [])
+    else:
+        # AgentState object
+        signature_detections = state.signature_detections
+    
+    # Check if detection succeeded and found signatures
+    if signature_detections and len(signature_detections) > 0:
+        return "continue"
+    
+    # No signatures found or detection failed
+    return "end"
+
+
 def create_checkpointer(config: AppConfig) -> Optional[BaseCheckpointSaver]:
     """
     Create a checkpointer based on configuration.
@@ -120,25 +175,53 @@ def create_workflow(config: AppConfig) -> Tuple[StateGraph, Optional[BaseCheckpo
         
         if config.features.human_in_loop:
             # Extraction → Human Review → Signature Detection
-            graph.add_edge("extraction", "human_review")
+            graph.add_conditional_edges(
+                "extraction",
+                should_continue_after_extraction,
+                {
+                    "continue": "human_review",
+                    "end": END
+                }
+            )
             
             if "signature_detection" in enabled_agents:
                 graph.add_edge("human_review", "signature_detection")
                 
                 if "verification" in enabled_agents:
-                    graph.add_edge("signature_detection", "verification")
+                    graph.add_conditional_edges(
+                        "signature_detection",
+                        should_continue_after_detection,
+                        {
+                            "continue": "verification",
+                            "end": END
+                        }
+                    )
                     graph.add_edge("verification", END)
                 else:
                     graph.add_edge("signature_detection", END)
             else:
                 graph.add_edge("human_review", END)
         else:
-            # No HITL - direct flow
+            # No HITL - direct flow with conditional edges
             if "signature_detection" in enabled_agents:
-                graph.add_edge("extraction", "signature_detection")
+                graph.add_conditional_edges(
+                    "extraction",
+                    should_continue_after_extraction,
+                    {
+                        "continue": "signature_detection",
+                        "end": END
+                    }
+                )
                 
                 if "verification" in enabled_agents:
-                    graph.add_edge("signature_detection", "verification")
+                    graph.add_conditional_edges(
+                        "signature_detection",
+                        should_continue_after_detection,
+                        {
+                            "continue": "verification",
+                            "end": END
+                        }
+                    )
                     graph.add_edge("verification", END)
                 else:
                     graph.add_edge("signature_detection", END)
@@ -182,6 +265,21 @@ def human_review_node(state: dict) -> dict:
     """
     state["current_step"] = "human_review"
     state["awaiting_approval"] = True
+    
+    # Add history entry for human review pause
+    if "history" not in state:
+        state["history"] = []
+    
+    from datetime import datetime
+    state["history"].append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "step": "human_review",
+        "action": "awaiting_approval",
+        "data": {},
+        "agent": "workflow",
+        "notes": "Workflow paused for human review"
+    })
+    
     return state
 
 
@@ -192,6 +290,12 @@ async def extraction_node_wrapper(state: dict, config: AppConfig) -> dict:
     """Async wrapper for extraction node."""
     # Convert dict to AgentState if needed
     if isinstance(state, dict):
+        # Handle missing fields gracefully
+        state.setdefault("extraction_attempts", [])
+        state.setdefault("detection_attempts", [])
+        state.setdefault("verification_attempts", [])
+        state.setdefault("history", [])
+        state.setdefault("human_modifications", {})
         agent_state = AgentState(**state)
     else:
         agent_state = state
@@ -203,6 +307,12 @@ async def extraction_node_wrapper(state: dict, config: AppConfig) -> dict:
 async def signature_detection_wrapper(state: dict, config: AppConfig) -> dict:
     """Async wrapper for signature detection node."""
     if isinstance(state, dict):
+        # Handle missing fields gracefully
+        state.setdefault("extraction_attempts", [])
+        state.setdefault("detection_attempts", [])
+        state.setdefault("verification_attempts", [])
+        state.setdefault("history", [])
+        state.setdefault("human_modifications", {})
         agent_state = AgentState(**state)
     else:
         agent_state = state
@@ -214,6 +324,12 @@ async def signature_detection_wrapper(state: dict, config: AppConfig) -> dict:
 async def verification_wrapper(state: dict, config: AppConfig) -> dict:
     """Async wrapper for verification node."""
     if isinstance(state, dict):
+        # Handle missing fields gracefully
+        state.setdefault("extraction_attempts", [])
+        state.setdefault("detection_attempts", [])
+        state.setdefault("verification_attempts", [])
+        state.setdefault("history", [])
+        state.setdefault("human_modifications", {})
         agent_state = AgentState(**state)
     else:
         agent_state = state

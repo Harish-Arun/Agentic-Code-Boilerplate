@@ -6,6 +6,12 @@ import sys
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load .env file for local development
+env_file = Path(__file__).parent.parent / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,4 +109,15 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    from pathlib import Path
+    
+    # Only watch api-service/ directory (absolute path)
+    service_dir = Path(__file__).parent.resolve()
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_dirs=[str(service_dir)],
+        reload_excludes=["agents/**", "mcp-tools/**", "frontend/**", "shared/**", "scripts/**"]
+    )

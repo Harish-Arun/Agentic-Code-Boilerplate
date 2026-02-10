@@ -87,7 +87,7 @@ database:
 ```yaml
 # config/app_config.yaml
 llm:
-  provider: "gemini"  # mock, gemini, openai, azure
+  provider: "gemini"  # gemini, openai, azure
   gemini:
     api_key: "${GEMINI_API_KEY}"
 ```

@@ -8,12 +8,33 @@ from .schemas import (
     BoundingBox,
     SignatureDetection,
     SignatureVerification,
+    SimilarityFactors,
+    ExtractionAttempt,
+    SignatureDetectionAttempt,
+    VerificationAttempt,
     ProcessingRequest,
     ProcessingResult,
     AgentState,
     HealthResponse,
     ErrorResponse,
 )
+
+from .metrics import (
+    M1GlobalForm,
+    M2LineQuality,
+    M3SlantAngle,
+    M4BaselineStability,
+    M5TerminalStrokes,
+    M6SpacingDensity,
+    M7PressureInference,
+    MetricsResult,
+    VetoResult,
+    ScoringEntry,
+    SignatureMatchScore,
+    MetricThresholds,
+)
+
+from .scoring import calculate_confidence_fiv1
 
 __all__ = [
     "DocumentStatus",
@@ -25,9 +46,27 @@ __all__ = [
     "BoundingBox",
     "SignatureDetection",
     "SignatureVerification",
+    "SimilarityFactors",
+    "ExtractionAttempt",
+    "SignatureDetectionAttempt",
+    "VerificationAttempt",
     "ProcessingRequest",
     "ProcessingResult",
     "AgentState",
+    # Metrics (M1–M7)
+    "M1GlobalForm",
+    "M2LineQuality",
+    "M3SlantAngle",
+    "M4BaselineStability",
+    "M5TerminalStrokes",
+    "M6SpacingDensity",
+    "M7PressureInference",
+    "MetricsResult",
+    "VetoResult",
+    "ScoringEntry",
+    "SignatureMatchScore",
+    "MetricThresholds",
+    "calculate_confidence_fiv1",
     "HealthResponse",
     "ErrorResponse",
 ]

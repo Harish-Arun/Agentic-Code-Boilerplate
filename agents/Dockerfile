@@ -8,8 +8,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared module first
+# Copy shared module first & install its deps
 COPY shared /app/shared
+RUN pip install --no-cache-dir -r /app/shared/requirements.txt
 
 # Copy requirements and install
 COPY agents/requirements.txt .
@@ -17,6 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY agents/ .
+
+# Make shared importable without sys.path hacks
+ENV PYTHONPATH=/app/shared:$PYTHONPATH
 
 # Expose port
 EXPOSE 8001

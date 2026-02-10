@@ -33,7 +33,7 @@ nnp-ai/
 │   ├── models/schemas.py           # Shared data models
 │   └── adapters/
 │       ├── database.py             # SQLite/Postgres/Mongo adapters
-│       └── llm.py                  # Mock/Gemini/OpenAI/Azure adapters
+│       └── llm.py                  # Gemini/OpenAI/Azure adapters
 │
 ├── frontend/                       # React+Vite OPS Portal
 │   ├── src/pages/DocumentList.jsx
@@ -81,7 +81,7 @@ No code changes needed - the adapter factory handles it.
 ```yaml
 # config/app_config.yaml  
 llm:
-  provider: "gemini"  # Change from "mock"
+  provider: "gemini"  # Default provider
   gemini:
     api_key: "${GEMINI_API_KEY}"
 ```
@@ -134,14 +134,14 @@ curl http://localhost:8002/health
 
 ### Access UI
 - Open http://localhost:3000
-- View Document List with mock data
+- View Document List
 - Click on a document to see Review screen
 
 ---
 
 ## Key Design Decisions
 
-1. **Mock implementations** - All services work without external dependencies (Gemini, databases)
+1. **Gemini-powered pipeline** - All services use Gemini for extraction, detection, and verification
 
 2. **Config-driven** - Single YAML file controls all swappable components
 
@@ -157,8 +157,7 @@ curl http://localhost:8002/health
 
 1. Copy `.env.example` to `.env` and configure
 2. Run `docker-compose up -d` to start all services
-3. Test the mock flow end-to-end
-4. Replace mock adapters with real ones as needed:
-   - Gemini for vision/extraction
+3. Test the flow end-to-end with a real PDF
+4. Swap adapters as needed:
    - PostgreSQL/MongoDB for persistence
-   - Real PDF processing in MCP tools
+   - OpenAI or Azure for alternative LLM providers

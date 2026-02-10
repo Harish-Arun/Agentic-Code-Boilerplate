@@ -3,13 +3,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (poppler-utils needed by pdf2image)
 RUN apt-get update && apt-get install -y \
     curl \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared module first
+# Copy shared module first & install its deps
 COPY shared /app/shared
+RUN pip install --no-cache-dir -r /app/shared/requirements.txt
 
 # Copy requirements and install
 COPY mcp-tools/requirements.txt .
@@ -17,6 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY mcp-tools/ .
+
+# Make shared importable without sys.path hacks
+ENV PYTHONPATH=/app/shared:$PYTHONPATH
 
 # Expose port
 EXPOSE 8002

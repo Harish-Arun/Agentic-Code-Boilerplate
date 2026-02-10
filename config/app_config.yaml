@@ -1,48 +1,70 @@
-# NNP-AI Configuration
-# This file drives all pluggable components
+# ============================================================
+# NNP-AI Application Configuration (Infrastructure / Tech)
+# ============================================================
+# This file contains ONLY infrastructure, service, and
+# technical settings. No business rules live here.
+#
+# Business logic (thresholds, prompts, decision rules) →
+#   config/business_config.yaml  (requires business sign-off)
+#
+# Owner: Engineering / DevOps
+# ============================================================
 
 # ============================================
-# Database Configuration
+# Service Ports
+# ============================================
+services:
+  api_gateway:
+    host: "0.0.0.0"
+    port: 8000
+  agents:
+    host: "0.0.0.0"
+    port: 8001
+  mcp_tools:
+    host: "0.0.0.0"
+    port: 8002
+
+# ============================================
+# Database Configuration (Pluggable)
 # ============================================
 database:
-  type: "sqlite"  # Options: sqlite, postgres, mongo
-  
-  # SQLite settings
+  type: "sqlite"  # Options: sqlite, postgres, mongo, dynamodb
+
   sqlite:
     path: "${DATA_DIR:-./data}/nnp_ai.db"
-  
-  # PostgreSQL settings  
+
   postgres:
     host: "${POSTGRES_HOST:-localhost}"
     port: ${POSTGRES_PORT:-5432}
     database: "${POSTGRES_DB:-nnp_ai}"
     user: "${POSTGRES_USER:-admin}"
     password: "${POSTGRES_PASSWORD:-}"
-  
-  # MongoDB settings
+
   mongo:
     uri: "${MONGO_URI:-mongodb://localhost:27017/nnp_ai}"
+
+  dynamodb:
+    region: "${AWS_REGION:-eu-west-2}"
+    table_prefix: "${DYNAMO_TABLE_PREFIX:-nnp_}"
+    endpoint_url: "${DYNAMO_ENDPOINT:-}"  # For local DynamoDB
 
 # ============================================
 # LLM Configuration
 # ============================================
 llm:
-  provider: "mock"  # Options: mock, gemini, openai, azure
-  
-  mock:
-    delay_ms: 100  # Simulate processing time
-  
+  provider: "${LLM_PROVIDER:-gemini}"  # Options: gemini, openai, azure
+
   gemini:
     api_key: "${GEMINI_API_KEY:-}"
-    model: "gemini-1.5-pro"
-    temperature: 0.1
-    max_tokens: 4096
-  
+    model: "${GEMINI_MODEL:-gemini-2.5-pro}"
+    temperature: 0.0
+    max_tokens: 16384
+
   openai:
     api_key: "${OPENAI_API_KEY:-}"
     model: "gpt-4"
     temperature: 0.1
-  
+
   azure:
     endpoint: "${AZURE_OPENAI_ENDPOINT:-}"
     api_key: "${AZURE_OPENAI_API_KEY:-}"
@@ -50,88 +72,53 @@ llm:
     api_version: "2024-02-15-preview"
 
 # ============================================
-# Agent Configuration
+# Agent Orchestrator Configuration
 # ============================================
 agents:
   enabled:
     - extraction
     - signature_detection
     - verification
-  
+
   retry:
     max_attempts: 3
     backoff_seconds: 1
-  
+
   checkpointing:
     enabled: true
     backend: "memory"  # Options: memory, redis, postgres
 
 # ============================================
-# MCP Tools Configuration
+# MCP Tools Server Configuration
 # ============================================
 mcp:
   server:
     host: "0.0.0.0"
     port: 8002
     transport: "sse"  # Options: sse, http, stdio
-  
+
   tools:
     enabled:
+      - extraction
+      - signature_detection
+      - signature_verification
       - ocr
-      - pdf_utils  
+      - pdf_utils
       - signature_provider
-    
-    # Tool-specific settings
-    ocr:
-      provider: "mock"  # Options: mock, gemini, tesseract
-    
+
     pdf_utils:
       max_pages: 50
       dpi: 300
-    
+
     signature_provider:
       cache_enabled: true
       cache_ttl_seconds: 3600
 
 # ============================================
-# Prompts (Easily Swappable)
-# ============================================
-prompts:
-  extraction: |
-    You are a document extraction specialist. Extract the following payment fields from the document:
-    - Creditor name and account
-    - Debtor name and account  
-    - Amount and currency
-    - Payment type
-    - Date
-    Return as structured JSON with confidence scores.
-  
-  signature_detection: |
-    Analyze this document image and identify all signature regions.
-    Return bounding boxes as [x1, y1, x2, y2] coordinates.
-  
-  signature_verification: |
-    Compare the extracted signature with the reference signature.
-    Analyze stroke patterns, consistency, and visual similarity.
-    Return match status, confidence score (0-1), and reasoning.
-
-# ============================================
-# Document Lifecycle States
-# ============================================
-document_states:
-  - INGESTED
-  - PROCESSING
-  - EXTRACTED
-  - VERIFIED
-  - REVIEWED
-  - CONFIRMED
-  - REJECTED
-
-# ============================================
 # Feature Flags
 # ============================================
 features:
-  human_in_loop: true
+  human_in_loop: false  # Set true for production (Stage 4)
   signature_verification: true
   auto_extraction: true
   audit_logging: true
@@ -144,3 +131,32 @@ logging:
   level: "${LOG_LEVEL:-INFO}"
   format: "json"  # Options: json, text
   include_timestamp: true
+
+# ============================================
+# File Storage Paths
+# ============================================
+storage:
+  data_dir: "${DATA_DIR:-./data}"
+  uploads_dir: "${DATA_DIR:-./data}/uploads"
+  signatures_dir: "${DATA_DIR:-./data}/signatures"
+  reference_dir: "${DATA_DIR:-./data}/reference"
+  debug_dir: "${DATA_DIR:-./data}/debug"
+
+# ============================================
+# External Document Sources (Stage 1 - Ingestion)
+# ============================================
+ingestion:
+  sources:
+    manual_upload:
+      enabled: true
+    network_drive:
+      enabled: false
+      protocol: "smb"          # smb, nfs, cifs
+      path: "${NETWORK_DRIVE_PATH:-}"
+      poll_interval_seconds: 60
+    s3_bucket:
+      enabled: false
+      bucket: "${S3_BUCKET:-}"
+      prefix: "${S3_PREFIX:-incoming/}"
+      region: "${AWS_REGION:-eu-west-2}"
+      poll_interval_seconds: 30

@@ -44,59 +44,10 @@ class LLMAdapter(ABC):
         pass
 
 
-class MockLLMAdapter(LLMAdapter):
-    """Mock implementation for testing and development."""
-    
-    def __init__(self, delay_ms: int = 100):
-        self.delay_ms = delay_ms
-    
-    async def _simulate_delay(self):
-        await asyncio.sleep(self.delay_ms / 1000)
-    
-    async def generate(
-        self, 
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        **kwargs
-    ) -> str:
-        await self._simulate_delay()
-        return f"[MOCK LLM Response] Processed prompt with {len(prompt)} characters."
-    
-    async def generate_with_vision(
-        self,
-        prompt: str,
-        images: List[Union[str, bytes]],
-        system_prompt: Optional[str] = None,
-        **kwargs
-    ) -> str:
-        await self._simulate_delay()
-        return f"[MOCK Vision Response] Analyzed {len(images)} image(s). Prompt: {prompt[:50]}..."
-    
-    async def generate_structured(
-        self,
-        prompt: str,
-        schema: Dict[str, Any],
-        system_prompt: Optional[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        await self._simulate_delay()
-        
-        # Return mock structured data based on common extraction fields
-        return {
-            "creditor": {"name": "ACME Corp", "account": "1234567890"},
-            "debtor": {"name": "John Doe", "account": "0987654321"},
-            "amount": {"value": 10000.00, "currency": "USD"},
-            "payment_type": "wire_transfer",
-            "date": "2026-01-29",
-            "confidence": 0.95,
-            "raw_text_preview": "[Mock extracted text...]"
-        }
-
-
 class GeminiAdapter(LLMAdapter):
     """Google Gemini implementation - for production vision tasks."""
     
-    def __init__(self, api_key: str, model: str = "gemini-1.5-pro", 
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash", 
                  temperature: float = 0.1, max_tokens: int = 4096):
         self.api_key = api_key
         self.model = model
@@ -362,9 +313,7 @@ def get_llm_adapter(config) -> LLMAdapter:
     """
     llm_config = config.llm
     
-    if llm_config.provider == "mock":
-        return MockLLMAdapter(llm_config.mock.delay_ms)
-    elif llm_config.provider == "gemini":
+    if llm_config.provider == "gemini":
         g = llm_config.gemini
         return GeminiAdapter(g.api_key, g.model, g.temperature, g.max_tokens)
     elif llm_config.provider == "openai":

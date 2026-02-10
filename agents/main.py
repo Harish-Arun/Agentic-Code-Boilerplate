@@ -10,6 +10,12 @@ import sys
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load .env file for local development
+env_file = Path(__file__).parent.parent / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,7 +39,7 @@ DEFAULT_DATA_DIR = os.environ.get("DATA_DIR", str(Path(__file__).resolve().paren
 
 class RunWorkflowRequest(BaseModel):
     document_id: str
-    document_path: str = f"{Path(DEFAULT_DATA_DIR).as_posix()}/mock_document.pdf"
+    document_path: str = f"{Path(DEFAULT_DATA_DIR).as_posix()}/sample_document.pdf"
     run_extraction: bool = True
     run_signature_verification: bool = True
 
@@ -178,8 +184,8 @@ async def run_agent_workflow(request: RunWorkflowRequest):
             status="AWAITING_APPROVAL" if is_paused else ("VERIFIED" if result.verification_result else "EXTRACTED"),
             is_paused=is_paused,
             current_step=result.current_step,
-            extracted_data=result.extracted_payment.model_dump() if result.extracted_payment else {},
-            signature_result=result.verification_result.model_dump() if result.verification_result else {},
+            extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
+            signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
             processing_time_ms=100,
             errors=result.extraction_errors + result.detection_errors + result.verification_errors
         )
@@ -212,17 +218,33 @@ async def resume_agent_workflow(request: ResumeWorkflowRequest):
             updated_state=updated_state
         )
         
-        return WorkflowResult(
+        response = WorkflowResult(
             document_id=result.document_id,
             thread_id=request.thread_id,
             status="VERIFIED" if result.verification_result else "EXTRACTED",
             is_paused=False,
             current_step=result.current_step,
-            extracted_data=result.extracted_payment.model_dump() if result.extracted_payment else {},
-            signature_result=result.verification_result.model_dump() if result.verification_result else {},
+            extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
+            signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
             processing_time_ms=100,
             errors=result.extraction_errors + result.detection_errors + result.verification_errors
         )
+        
+        # DEBUG: Log complete response before sending
+        print("\n" + "="*80)
+        print("📤 AGENTS RESPONSE TO API SERVICE")
+        print("="*80)
+        print(f"Status: {response.status}")
+        print(f"Current Step: {response.current_step}")
+        print(f"\nExtracted Data ({len(response.extracted_data)} fields):")
+        import json
+        print(json.dumps(response.extracted_data, indent=2))
+        print(f"\nSignature Result:")
+        print(json.dumps(response.signature_result, indent=2))
+        print(f"\nErrors: {response.errors}")
+        print("="*80 + "\n")
+        
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -274,7 +296,7 @@ async def run_extraction_only(request: RunWorkflowRequest):
     
     return {
         "document_id": request.document_id,
-        "extracted_data": result.extracted_payment.model_dump() if result.extracted_payment else {},
+        "extracted_data": result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
         "errors": result.extraction_errors
     }
 
@@ -305,4 +327,15 @@ async def run_signature_only(request: RunWorkflowRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    from pathlib import Path
+    
+    # Only watch agents/ directory (absolute path)
+    service_dir = Path(__file__).parent.resolve()
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8001,
+        reload=True,
+        reload_dirs=[str(service_dir)],
+        reload_excludes=["api-service/**", "mcp-tools/**", "frontend/**", "shared/**", "scripts/**"]
+    )

@@ -8,8 +8,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy shared module first
+# Copy shared module first & install its deps
 COPY shared /app/shared
+RUN pip install --no-cache-dir -r /app/shared/requirements.txt
 
 # Copy requirements and install
 COPY api-service/requirements.txt .
@@ -20,6 +21,9 @@ COPY api-service/ .
 
 # Create data directory
 RUN mkdir -p /app/data
+
+# Make shared importable without sys.path hacks
+ENV PYTHONPATH=/app/shared:$PYTHONPATH
 
 # Expose port
 EXPOSE 8000

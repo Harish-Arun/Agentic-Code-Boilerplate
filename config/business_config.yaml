@@ -1,0 +1,260 @@
+# ============================================================
+# NNP-AI Business Logic Configuration
+# ============================================================
+# This file contains ALL business rules, thresholds, and
+# decision logic for signature verification and payment
+# processing. Changes here require business sign-off.
+#
+# Owner: Business / Operations
+# Approval: Business Stakeholder Sign-off Required
+# ============================================================
+
+# ============================================
+# Signature Metric Thresholds (FIV 1.0)
+# ============================================
+# These thresholds drive the deterministic scoring engine.
+# The LLM provides raw metric values; these rules decide
+# APPROVE / FLAG_FOR_REVIEW / REJECT.
+
+metric_thresholds:
+  # M1 - Global Form (aspect-ratio delta)
+  m1_tolerance: 0.10      # No penalty below this delta
+  m1_veto: 0.50           # Auto-reject above this delta
+  m1_weight: 15            # Penalty weight (out of 100)
+
+  # M2 - Line Quality (0-100 quality score)
+  m2_min_quality: 60      # Penalty when quality below this
+  m2_weight: 10
+
+  # M3 - Slant Angle (degrees delta)
+  m3_tolerance: 5.0       # No penalty below this delta
+  m3_veto: 45.0           # Auto-reject above this delta
+  m3_weight: 10
+
+  # M4 - Baseline Stability (drift delta, 0-1)
+  m4_tolerance: 0.10
+  m4_weight: 10
+
+  # M5 - Terminal Strokes (categorical match status)
+  m5_weight: 20
+  # Veto when match_status == COMPLETE_MISMATCH
+
+  # M6 - Spacing & Density (density delta)
+  m6_tolerance: 0.15
+  m6_weight: 10
+
+  # M7 - Pressure Inference (pressure delta)
+  m7_tolerance: 30.0
+  m7_weight: 15
+
+# ============================================
+# Decision Thresholds
+# ============================================
+# Final confidence score (0-100) determines the decision.
+
+decision_thresholds:
+  approve_threshold: 80     # ≥ 80 → APPROVE
+  flag_min_threshold: 60    # 60-79 → FLAG_FOR_REVIEW
+  # < 60 → REJECT
+
+# ============================================
+# Document Lifecycle States
+# ============================================
+# Defines the valid state machine for document processing.
+
+document_states:
+  - INGESTED          # Document received (Stage 1)
+  - PROCESSING        # Pipeline is running
+  - EXTRACTED         # Fields extracted (Stage 2 complete)
+  - AUTHENTICATED     # Signature verified (Stage 3 complete)
+  - REVIEW_PENDING    # Awaiting HITL review (Stage 4)
+  - APPROVED          # HITL approved (Stage 4 complete)
+  - REJECTED          # Rejected at any stage
+  - DISPATCHED        # Payment sent (Stage 5 complete)
+
+# ============================================
+# Extraction Rules
+# ============================================
+# Business rules for field extraction and validation.
+
+extraction_rules:
+  required_fields:
+    - creditor_name
+    - creditor_account
+    - debtor_name
+    - debtor_account
+    - amount
+    - currency
+
+  minimum_confidence: 0.70    # Flag if any required field below this
+  
+  # Account validation
+  account_format: "IBAN"      # Expected format: IBAN, SORT_CODE, etc.
+  iban_min_length: 15
+  iban_max_length: 34
+  
+  # Amount validation
+  max_amount_no_review: 50000  # Amounts above this always go to HITL
+  min_amount: 0.01             # Minimum valid amount
+
+# ============================================
+# Authentication Rules (Stage 3)
+# ============================================
+# Controls which validations run in the authentication stage.
+
+authentication:
+  signature_verification:
+    enabled: true
+    require_reference: true     # Reject if no reference signature found
+    max_signatures_per_doc: 5   # Safety limit
+
+# ============================================
+# HITL Review Guidance (Stage 4)
+# ============================================
+# All documents go through HITL review. The confidence score
+# provides guidance to the reviewer on how thoroughly to check.
+#
+# ≥ 95  → High confidence. Reviewer can approve quickly.
+# 31-94 → Needs careful manual review before decision.
+# ≤ 30  → Fundamentally mismatched. Requires thorough
+#          investigation before any approval.
+
+hitl:
+  high_confidence_threshold: 95   # ≥ 95 → quick approve guidance
+  critical_threshold: 30          # ≤ 30 → thorough investigation required
+  max_review_time_hours: 24       # SLA for human review
+
+# ============================================
+# Prompts (Business-Owned)
+# ============================================
+# These prompts define WHAT the AI extracts and HOW it evaluates.
+# Changes here affect AI output quality and must be validated.
+
+prompts:
+  # Payment field extraction prompt
+  extraction:
+    system: |
+      You are a payment document processing assistant. Your task is to extract payment-related information from documents.
+    user: |
+      Extract the following payment fields from the provided document:
+      
+      1. Creditor/Beneficiary information:
+         - creditor_name: Full name and address if available
+         - creditor_account: Account number (IBAN or local format)
+         - creditor_bank: Bank name
+      
+      2. Debtor/Ordering party information:
+         - debtor_name: Full name
+         - debtor_account: Account number
+         - debtor_bank: Bank name
+      
+      3. Payment details:
+         - amount: Numeric value only (no currency symbols)
+         - currency: ISO currency code (GBP, USD, EUR, etc.)
+         - payment_type: Type of payment (CHAPS, BACS, SWIFT, Wire Transfer, etc.)
+         - payment_date: Date of payment (DD/MM/YYYY format if possible)
+      
+      4. Additional information:
+         - charges_account: Account to be charged (if different from debtor)
+         - reference: Payment reference or description
+      
+      For each field, provide:
+      - value: The extracted value (or null if not found)
+      - confidence: Your confidence score (0.0 to 1.0)
+      - location: Where you found it in the document (e.g., "Section 3", "top right", etc.)
+      
+      IMPORTANT: 
+      - Extract numeric values without currency symbols
+      - Preserve all digits in account numbers
+      - If a field is not found or unclear, set value to null and confidence to 0.0
+
+  # Signature detection prompt
+  signature_detection:
+    system: |
+      You are a forensic document examiner specialized in detecting signatures and handwritten elements.
+    user: |
+      Analyze this document and detect ALL signatures present.
+      
+      IMPORTANT RULES:
+      1. Only detect ACTUAL HANDWRITTEN SIGNATURES (ink on paper)
+      2. DO NOT mark empty signature boxes or fields as signatures
+      3. DO NOT mark date fields or date signature areas as signatures
+      4. DO NOT mark printed text or typed names as signatures
+      5. Ignore signature labels like "Signature:", "Authorized by:", etc.
+      
+      **CRITICAL: Use NORMALIZED coordinates (0.0 to 1.0)**
+      Do NOT use pixel coordinates. Use normalized values:
+      - 0.0 = left/top edge of page
+      - 1.0 = right/bottom edge of page
+      - Example: [0.1, 0.5, 0.4, 0.6] NOT [100, 500, 400, 600]
+      
+      For each ACTUAL signature found:
+      - signature_id: unique identifier (e.g., "sig_1", "sig_2")
+      - page_number: page number where signature appears (1-indexed)
+      - bounding_box: [x_min, y_min, x_max, y_max] NORMALIZED 0.0-1.0 (NOT pixels!)
+      - signer_name: name of the signer if identifiable from context
+      - signature_type: "customer" | "bank_initiator" | "bank_authenticator" | "unknown"
+      - confidence: your confidence this is a real signature (0.0-1.0)
+      - description: brief description of signature location
+      
+      Coordinates MUST be normalized 0.0-1.0 (decimals, not pixels).
+      Return empty list if NO ACTUAL SIGNATURES are present (only empty boxes).
+
+  # Signature verification prompt with M1-M7 forensic framework
+  signature_verification:
+    system: |
+      You are a Forensic Document Examiner (FDE) with expertise in signature verification.
+      You will analyze two signature images: a "questioned" signature and a "reference" signature.
+      Your task is to perform a comprehensive forensic comparison using the M1-M7 metric framework.
+    user: |
+      Compare the QUESTIONED signature against the REFERENCE signature using the following forensic metrics:
+      
+      **M1 - Global Form (Shape & Aspect Ratio)**
+      - Measure the bounding box aspect ratio (width/height) of each signature
+      - Calculate the absolute delta between reference and questioned ratios
+      - Score: 100 if delta ≤ 0.10, linear penalty if delta > 0.10
+      - VETO FLAG: If delta > 0.50, mark as VETO (auto-reject)
+      - Note any size, proportion, or overall shape discrepancies
+      
+      **M2 - Line Quality (Fluency & Naturalness)**
+      - Assess line smoothness, tremor, hesitation marks, pen lifts
+      - Score 0-100 for questioned signature quality
+      - Score 0-100 for reference signature quality
+      - Note any unnatural hesitations, patching, or simulation indicators
+      
+      **M3 - Slant Angle (Writing Angle)**
+      - Measure dominant slant angle in degrees for each signature
+      - Calculate absolute delta between angles
+      - VETO FLAG: If delta > 45°, mark as VETO
+      - Note any inconsistencies in writing direction
+      
+      **M4 - Baseline Stability (Writing Line Drift)**
+      - Measure baseline drift/slope as a normalized value (0-1)
+      - Calculate absolute delta between drifts
+      - Score: 100 if delta ≤ 0.10, penalties for larger drift differences
+      - Note any wavy lines, tremor, or control issues
+      
+      **M5 - Terminal Strokes (Personal Quirks)**
+      - Identify distinctive start/end strokes, flourishes, cross-strokes
+      - Match status: COMPLETE_MATCH, PARTIAL_MATCH, or COMPLETE_MISMATCH
+      - VETO FLAG: If COMPLETE_MISMATCH, mark as VETO
+      - List specific terminal features present/absent
+      
+      **M6 - Spacing & Density (Ink Distribution)**
+      - Measure spacing between strokes and ink density (0-1 normalized)
+      - Calculate absolute delta between densities
+      - Score: 100 if delta ≤ 0.15, penalties for larger differences
+      - Note any compression, expansion, or density variations
+      
+      **M7 - Pressure Inference (Stroke Thickness)**
+      - Infer writing pressure from stroke thickness (scale 0-100)
+      - Calculate absolute delta between pressure values
+      - Score: 100 if delta ≤ 30, penalties for larger differences
+      - Note any pressure inconsistencies
+      
+      **FORMAT REQUIREMENTS:**
+      - Return ONLY pure JSON with ALL seven metrics
+      - Each metric must include: reference_value, questioned_value, delta, score, status, notes, execution details
+      - DO NOT include explanatory text outside the JSON
+      - Status values: PASS, WARN, FAIL, or VETO
+      - Include all numeric measurements

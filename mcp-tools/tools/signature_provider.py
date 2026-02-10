@@ -1,80 +1,124 @@
 """
 Signature Provider Tool - Reference signature management.
 
-Provides tools to retrieve and store reference signatures for verification.
+Provides tools to retrieve and manage reference signatures for verification.
+Reference signatures are stored in the local filesystem (data/reference/),
+simulating the ISV (Identity & Signature Verification) service that returns
+signature blobs in production.
+
+Folder structure:
+  data/reference/
+    ├── CUST001.png       # Customer ID maps directly to filename
+    ├── CUST002.jpg
+    └── john_smith.png    # Also supports name-based lookup
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastmcp import FastMCP
 from datetime import datetime
 import os
+import base64
 from pathlib import Path
 
 import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
 from config import AppConfig
 
 
-# Mock signature database
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
+# Supported image extensions for reference signatures
+SIGNATURE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
 
-_mock_signatures = {
-    "CUST001": {
-        "customer_id": "CUST001",
-        "customer_name": "John Smith",
-        "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/cust001_signature.png",
-        "created_at": "2025-01-15T10:00:00Z",
-        "verified": True
-    },
-    "CUST002": {
-        "customer_id": "CUST002",
-        "customer_name": "Jane Doe",
-        "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/cust002_signature.png",
-        "created_at": "2025-02-20T14:30:00Z",
-        "verified": True
-    }
-}
+
+def _scan_reference_dir(reference_dir: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Scan the reference directory and build an index of available signatures.
+    Maps customer_id (stem of filename) -> signature metadata.
+    """
+    ref_path = Path(reference_dir)
+    index = {}
+    
+    if not ref_path.exists():
+        return index
+    
+    for f in ref_path.iterdir():
+        if f.is_file() and f.suffix.lower() in SIGNATURE_EXTENSIONS:
+            customer_id = f.stem.upper()
+            # Read file bytes and base64 encode to simulate ISV blob response
+            file_bytes = f.read_bytes()
+            mime_ext = f.suffix.lstrip(".").lower()
+            mime_type = f"image/{mime_ext}" if mime_ext != "jpg" else "image/jpeg"
+            
+            index[customer_id] = {
+                "customer_id": customer_id,
+                "customer_name": f.stem.replace("_", " ").title(),
+                "signature_image_path": str(f.resolve()),
+                "image_blob": base64.b64encode(file_bytes).decode("utf-8"),
+                "blob_mime_type": mime_type,
+                "blob_size_bytes": len(file_bytes),
+                "file_size_bytes": len(file_bytes),
+                "format": f.suffix.lstrip(".").upper(),
+                "created_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                "verified": True,
+            }
+    
+    return index
 
 
 def register_signature_tools(mcp: FastMCP, config: AppConfig):
     """Register signature-related tools with the MCP server."""
     
-    sig_config = config.mcp.tools.signature_provider
+    reference_dir = config.storage.reference_dir
     
     @mcp.tool()
     async def get_reference_signature(
         customer_id: str
     ) -> Dict[str, Any]:
         """
-        Get reference signature for a customer.
+        Get reference signature for a customer from the local reference folder.
+        Simulates calling the ISV service which returns a signature blob.
         
         Args:
-            customer_id: Customer identifier
+            customer_id: Customer identifier (matched against filenames)
         
         Returns:
             Reference signature details including image path
         """
-        # Check mock database
-        if customer_id in _mock_signatures:
-            sig_data = _mock_signatures[customer_id]
+        # Rebuild index on each call (folder contents may change)
+        index = _scan_reference_dir(reference_dir)
+        
+        lookup_id = customer_id.upper()
+        
+        # Direct match by customer ID
+        if lookup_id in index:
             return {
                 "success": True,
-                "signature": sig_data,
+                "signature": index[lookup_id],
                 "message": "Reference signature found"
             }
         
-        # Return not found (mock fallback with generic signature)
+        # Fuzzy match: search by partial name in filenames
+        for cid, sig_data in index.items():
+            if lookup_id in cid or cid in lookup_id:
+                return {
+                    "success": True,
+                    "signature": sig_data,
+                    "message": f"Reference signature found (partial match: {cid})"
+                }
+        
+        # If only one reference exists, use it as default
+        if len(index) == 1:
+            only_sig = list(index.values())[0]
+            return {
+                "success": True,
+                "signature": only_sig,
+                "message": "Using only available reference signature as default"
+            }
+        
         return {
-            "success": True,
-            "signature": {
-                "customer_id": customer_id,
-                "customer_name": f"Customer {customer_id}",
-                "signature_image_path": f"{Path(DATA_DIR).as_posix()}/references/default_signature.png",
-                "created_at": datetime.utcnow().isoformat(),
-                "verified": False
-            },
-            "message": "[Mock] No reference signature found, using default"
+            "success": False,
+            "signature": None,
+            "message": f"No reference signature found for customer: {customer_id}. "
+                       f"Place a signature image in {reference_dir}/"
         }
     
     @mcp.tool()
@@ -85,30 +129,38 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
         verified: bool = False
     ) -> Dict[str, Any]:
         """
-        Store a new reference signature.
+        Store a new reference signature by copying it to the reference folder.
         
         Args:
             customer_id: Customer identifier
             customer_name: Customer's name
-            signature_image_path: Path to the signature image
+            signature_image_path: Path to the source signature image
             verified: Whether the signature has been verified
         
         Returns:
             Confirmation of storage
         """
-        # Mock store
-        _mock_signatures[customer_id] = {
-            "customer_id": customer_id,
-            "customer_name": customer_name,
-            "signature_image_path": signature_image_path,
-            "created_at": datetime.utcnow().isoformat(),
-            "verified": verified
-        }
+        import shutil
+        
+        ref_path = Path(reference_dir)
+        ref_path.mkdir(parents=True, exist_ok=True)
+        
+        source = Path(signature_image_path)
+        if not source.exists():
+            return {
+                "success": False,
+                "message": f"Source signature not found: {signature_image_path}"
+            }
+        
+        # Copy to reference directory with customer_id as filename
+        dest = ref_path / f"{customer_id.upper()}{source.suffix}"
+        shutil.copy2(str(source), str(dest))
         
         return {
             "success": True,
-            "signature_id": customer_id,
-            "message": "[Mock] Signature stored successfully"
+            "signature_id": customer_id.upper(),
+            "stored_path": str(dest),
+            "message": f"Signature stored for {customer_name} at {dest}"
         }
     
     @mcp.tool()
@@ -117,7 +169,7 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
         offset: int = 0
     ) -> Dict[str, Any]:
         """
-        List all stored reference signatures.
+        List all stored reference signatures in the reference folder.
         
         Args:
             limit: Maximum number of signatures to return
@@ -126,13 +178,15 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
         Returns:
             List of signature records
         """
-        signatures = list(_mock_signatures.values())
+        index = _scan_reference_dir(reference_dir)
+        signatures = list(index.values())
         paginated = signatures[offset:offset + limit]
         
         return {
             "success": True,
             "signatures": paginated,
             "total": len(signatures),
+            "reference_dir": reference_dir,
             "limit": limit,
             "offset": offset
         }
@@ -142,7 +196,7 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
         customer_id: str
     ) -> Dict[str, Any]:
         """
-        Delete a reference signature.
+        Delete a reference signature from the reference folder.
         
         Args:
             customer_id: Customer identifier
@@ -150,45 +204,19 @@ def register_signature_tools(mcp: FastMCP, config: AppConfig):
         Returns:
             Confirmation of deletion
         """
-        if customer_id in _mock_signatures:
-            del _mock_signatures[customer_id]
-            return {
-                "success": True,
-                "message": f"Signature for {customer_id} deleted"
-            }
+        index = _scan_reference_dir(reference_dir)
+        lookup_id = customer_id.upper()
+        
+        if lookup_id in index:
+            sig_path = Path(index[lookup_id]["signature_image_path"])
+            if sig_path.exists():
+                sig_path.unlink()
+                return {
+                    "success": True,
+                    "message": f"Signature for {customer_id} deleted from {sig_path}"
+                }
         
         return {
             "success": False,
-            "message": f"Signature for {customer_id} not found"
-        }
-    
-    @mcp.tool()
-    async def compare_signatures(
-        extracted_signature_path: str,
-        reference_signature_path: str
-    ) -> Dict[str, Any]:
-        """
-        Compare two signature images.
-        
-        This is a simplified comparison - in production, use ML models.
-        
-        Args:
-            extracted_signature_path: Path to extracted signature
-            reference_signature_path: Path to reference signature
-        
-        Returns:
-            Comparison result with similarity score
-        """
-        # Mock comparison
-        return {
-            "success": True,
-            "match": True,
-            "similarity_score": 0.87,
-            "confidence": 0.85,
-            "analysis": {
-                "stroke_consistency": 0.89,
-                "shape_similarity": 0.85,
-                "pressure_pattern": 0.86
-            },
-            "message": "[Mock] Signatures compared using visual analysis"
+            "message": f"Signature for {customer_id} not found in {reference_dir}"
         }

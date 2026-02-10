@@ -49,8 +49,7 @@ async def process_document_async(
     """
     Background task to process a document through the agent pipeline.
     
-    In production, this calls the Agents service.
-    For boilerplate, we mock the processing.
+    Calls the Agents service which runs the LangGraph workflow.
     """
     try:
         # Update status to PROCESSING
@@ -61,8 +60,9 @@ async def process_document_async(
         agents_url = os.environ.get("AGENTS_SERVICE_URL", "http://localhost:8001")
         
         # Try to call agents service (may not be running in dev)
+        # Increased timeout to 300s (5 min) for signature verification with Gemini
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     f"{agents_url}/run",
                     json={
@@ -75,42 +75,29 @@ async def process_document_async(
                 
                 if response.status_code == 200:
                     result = response.json()
+                    
+                    # DEBUG: Log response from agents
+                    print("\n" + "="*80)
+                    print("📥 API SERVICE - Received from Agents")
+                    print("="*80)
+                    import json
+                    print(json.dumps(result, indent=2, default=str))
+                    print("="*80 + "\n")
+                    
                     await db.update_document(document_id, {
                         "status": result.get("status", "EXTRACTED"),
                         "extracted_data": result.get("extracted_data", {}),
                         "signature_result": result.get("signature_result", {})
                     })
                     return
-        except httpx.RequestError:
-            # Agents service not available - use mock
-            pass
-        
-        # Mock processing (when agents service not available)
-        import asyncio
-        await asyncio.sleep(1)  # Simulate processing time
-        
-        mock_extracted = {
-            "creditor_name": {"value": "ACME Corporation Ltd", "confidence": 0.95, "source": "ai"},
-            "creditor_account": {"value": "GB29 NWBK 6016 1331 9268 19", "confidence": 0.92, "source": "ai"},
-            "debtor_name": {"value": "John Smith", "confidence": 0.94, "source": "ai"},
-            "debtor_account": {"value": "GB82 WEST 1234 5698 7654 32", "confidence": 0.91, "source": "ai"},
-            "amount": {"value": "15,000.00", "confidence": 0.98, "source": "ai"},
-            "currency": {"value": "GBP", "confidence": 0.99, "source": "ai"},
-            "payment_type": {"value": "CHAPS", "confidence": 0.88, "source": "ai"},
-            "payment_date": {"value": "29/01/2026", "confidence": 0.85, "source": "ai"}
-        }
-        
-        mock_signature = {
-            "match": True,
-            "confidence": 0.87,
-            "reasoning": "[Mock] Signature patterns appear consistent"
-        }
-        
-        await db.update_document(document_id, {
-            "status": "VERIFIED",
-            "extracted_data": mock_extracted,
-            "signature_result": mock_signature
-        })
+        except httpx.RequestError as conn_err:
+            # Agents service not available — fail with clear error
+            await db.update_document(document_id, {
+                "status": "INGESTED",  # Reset to allow retry
+            })
+            raise RuntimeError(
+                f"Agents service unavailable at {agents_url}: {conn_err}"
+            )
         
     except Exception as e:
         await db.update_document(document_id, {
@@ -162,7 +149,7 @@ async def process_document(
     # Start background processing
     default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
     data_dir = os.environ.get("DATA_DIR", str(default_data_dir))
-    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/mock_document.pdf"
+    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/uploads/sample_document.pdf"
     background_tasks.add_task(
         process_document_async,
         process_request.document_id,
@@ -239,7 +226,7 @@ async def rerun_processing(
 
     default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
     data_dir = os.environ.get("DATA_DIR", str(default_data_dir))
-    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/mock_document.pdf"
+    document_path = doc.get("raw_file_path") or f"{Path(data_dir).as_posix()}/uploads/sample_document.pdf"
     
     background_tasks.add_task(
         process_document_async,
@@ -255,3 +242,56 @@ async def rerun_processing(
         "message": f"Re-running {step} processing",
         "status": "PROCESSING"
     }
+
+
+@router.get("/history/{document_id}")
+async def get_processing_history(request: Request, document_id: str):
+    """
+    Get the workflow history for a document.
+    
+    Returns the full processing history including:
+    - All extraction attempts
+    - All signature detection attempts  
+    - All verification attempts
+    - State transitions
+    """
+    db = request.app.state.db
+    
+    doc = await db.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    
+    # Try to get workflow state from agents service
+    import os
+    agents_url = os.environ.get("AGENTS_SERVICE_URL", "http://localhost:8001")
+    thread_id = f"doc_{document_id}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{agents_url}/status/{thread_id}")
+            
+            if response.status_code == 200:
+                state_data = response.json()
+                return {
+                    "document_id": document_id,
+                    "thread_id": thread_id,
+                    "workflow_state": state_data.get("state", {}),
+                    "is_paused": state_data.get("is_paused", False),
+                    "current_step": state_data.get("current_step", "unknown")
+                }
+    except httpx.RequestError:
+        pass
+    
+    # Fallback - return document state
+    return {
+        "document_id": document_id,
+        "thread_id": thread_id,
+        "workflow_state": {
+            "status": doc.get("status"),
+            "extracted_data": doc.get("extracted_data", {}),
+            "signature_result": doc.get("signature_result", {})
+        },
+        "is_paused": False,
+        "current_step": doc.get("status", "unknown").lower()
+    }
+

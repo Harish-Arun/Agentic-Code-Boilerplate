@@ -144,6 +144,14 @@ class SQLiteAdapter(DatabaseAdapter):
             return [self._row_to_dict(row) for row in rows]
     
     async def update_document(self, document_id: str, updates: Dict[str, Any]) -> bool:
+        # DEBUG: Log what's being stored
+        print("\n" + "="*80)
+        print("💾 DATABASE UPDATE")
+        print("="*80)
+        print(f"Document ID: {document_id}")
+        print(f"Updates: {json.dumps(updates, indent=2, default=str)}")
+        print("="*80 + "\n")
+        
         set_clauses = []
         params = []
         

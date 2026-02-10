@@ -3,15 +3,17 @@
 # FastMCP (includes Starlette, handles HTTP server internally)
 fastmcp>=2.0.0
 
-# LLM adapters (optional)
-# google-generativeai>=0.3.0  # For Gemini vision OCR
+# HTTP client for Gemini REST API
+httpx>=0.26.0
 
 # Config & validation
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 pyyaml>=6.0
 
-# Image processing (for production PDF/image tools)
-# pillow>=10.0.0
-# pdf2image>=1.16.0
-# pypdf>=3.17.0
+# Image processing (required for production)
+pillow>=10.0.0
+pdf2image>=1.16.0
+
+# PDF processing (required for signature cropping)
+PyMuPDF>=1.23.0
