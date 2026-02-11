@@ -12,7 +12,7 @@ import httpx
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 
-from shared.models.schemas import LLMResponse, LLMThinkingMetadata
+from models.schemas import LLMResponse, LLMThinkingMetadata
 
 
 def get_api_key() -> str:
@@ -107,6 +107,9 @@ class GeminiRestAdapter:
         self.thinking_budget = thinking_budget if thinking_budget is not None else (int(os.environ.get("GEMINI_THINKING_BUDGET", -1)))
         self.thinking_level = thinking_level or os.environ.get("GEMINI_THINKING_LEVEL")
         self.include_thoughts = include_thoughts if include_thoughts is not None else os.environ.get("GEMINI_INCLUDE_THOUGHTS", "false").lower() == "true"
+        
+        # Store last thinking metadata for high-level methods
+        self._last_thinking = None
         
         if not self.api_key:
             raise ValueError("Failed to obtain API key. Check authentication configuration.")
@@ -445,6 +448,9 @@ Respond with ONLY the JSON object, nothing else."""
         else:
             llm_response = await self.generate(structured_prompt, system_prompt)
         
+        # Store thinking metadata for high-level methods
+        self._last_thinking = llm_response.thinking
+        
         # Extract just the text for JSON parsing
         response = llm_response.text
         
@@ -542,12 +548,23 @@ Respond with ONLY the JSON object, nothing else."""
             "raw_text": "string - full OCR text of the document"
         }
         
-        return await self.generate_structured(
+        result = await self.generate_structured(
             _user_prompt,
             schema,
             system_prompt=_system_prompt,
             files=[file_path]
         )
+        
+        # Include thinking metadata in response
+        if self._last_thinking:
+            result["_thinking"] = {
+                "thoughts": self._last_thinking.thoughts,
+                "thoughts_token_count": self._last_thinking.thoughts_token_count,
+                "thinking_budget_used": self._last_thinking.thinking_budget_used,
+                "total_token_count": self._last_thinking.total_token_count
+            }
+        
+        return result
     
     async def detect_signatures(
         self,
@@ -588,12 +605,23 @@ Respond with ONLY the JSON object, nothing else."""
             "total_signatures_found": 0
         }
         
-        return await self.generate_structured(
+        result = await self.generate_structured(
             _user_prompt,
             schema,
             system_prompt=_system_prompt,
             files=[file_path]
         )
+        
+        # Include thinking metadata in response
+        if self._last_thinking:
+            result["_thinking"] = {
+                "thoughts": self._last_thinking.thoughts,
+                "thoughts_token_count": self._last_thinking.thoughts_token_count,
+                "thinking_budget_used": self._last_thinking.thinking_budget_used,
+                "total_token_count": self._last_thinking.total_token_count
+            }
+        
+        return result
     
     async def verify_signatures(
         self,
@@ -700,12 +728,23 @@ Respond with ONLY the JSON object, nothing else."""
         # Prepare files list — supports paths, bytes, or (bytes, mime_type) tuples
         files = [reference_image, signature_image]
         
-        return await self.generate_structured(
+        result = await self.generate_structured(
             _user_prompt,
             schema,
             system_prompt=_system_prompt,
             files=files
         )
+        
+        # Include thinking metadata in response
+        if self._last_thinking:
+            result["_thinking"] = {
+                "thoughts": self._last_thinking.thoughts,
+                "thoughts_token_count": self._last_thinking.thoughts_token_count,
+                "thinking_budget_used": self._last_thinking.thinking_budget_used,
+                "total_token_count": self._last_thinking.total_token_count
+            }
+        
+        return result
 
 
 # Factory function

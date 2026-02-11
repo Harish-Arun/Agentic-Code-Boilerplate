@@ -87,7 +87,8 @@ async def process_document_async(
                     await db.update_document(document_id, {
                         "status": result.get("status", "EXTRACTED"),
                         "extracted_data": result.get("extracted_data", {}),
-                        "signature_result": result.get("signature_result", {})
+                        "signature_result": result.get("signature_result", {}),
+                        "thinking_traces": result.get("thinking_traces", [])
                     })
                     return
         except httpx.RequestError as conn_err:

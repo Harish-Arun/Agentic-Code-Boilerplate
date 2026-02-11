@@ -70,6 +70,7 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
             raw_payment = extraction_result["extracted_payment"]
             extracted_payment = _convert_mcp_response(raw_payment)
             model_used = extraction_result.get("model_used", "")
+            thinking_metadata = extraction_result.get("thinking", {})
             
             # DEBUG: Log extracted fields
             print("\n" + "="*80)
@@ -78,6 +79,18 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
             import json
             print(json.dumps(raw_payment, indent=2, default=str))
             print(f"\nConverted to model with {_count_fields(extracted_payment)} non-null fields")
+            
+            # DEBUG: Log thinking metadata if available
+            if thinking_metadata:
+                print("\n" + "="*80)
+                print("🧠 THINKING TRACES")
+                print("="*80)
+                print(f"Thoughts Token Count: {thinking_metadata.get('thoughts_token_count')}")
+                print(f"Total Token Count: {thinking_metadata.get('total_token_count')}")
+                if thinking_metadata.get('thoughts'):
+                    print(f"Thought Summaries: {len(thinking_metadata.get('thoughts'))} thoughts")
+                    for i, thought in enumerate(thinking_metadata.get('thoughts', [])[:3], 1):
+                        print(f"  {i}. {thought[:100]}...")
             print("="*80 + "\n")
 
             # Step 2: Validate extraction via MCP
@@ -97,7 +110,10 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
                 extracted_payment=extracted_payment,
                 model_used=model_used,
                 processing_time_ms=processing_time,
-                raw_response=str(raw_payment)[:2000]
+                raw_response=str(raw_payment)[:2000],
+                thoughts=thinking_metadata.get("thoughts"),
+                thoughts_token_count=thinking_metadata.get("thoughts_token_count"),
+                thinking_budget_used=thinking_metadata.get("thinking_budget_used")
             )
             state.add_extraction_attempt(attempt)
 

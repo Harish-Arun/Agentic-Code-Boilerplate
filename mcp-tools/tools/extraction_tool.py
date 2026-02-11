@@ -72,6 +72,7 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
             )
 
             raw_text = result.get("raw_text", "")
+            thinking_metadata = result.get("_thinking", {})
 
             extracted_payment = {
                 "creditor_name": result.get("creditor_name"),
@@ -93,7 +94,8 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
                 "success": True,
                 "extracted_payment": extracted_payment,
                 "model_used": gemini.model,
-                "raw_response_length": len(str(result))
+                "raw_response_length": len(str(result)),
+                "thinking": thinking_metadata
             }
 
         except Exception as e:

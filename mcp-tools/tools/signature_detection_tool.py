@@ -72,6 +72,9 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
                 user_prompt=user_prompt
             )
 
+            # Extract thinking metadata
+            thinking_metadata = result.get("_thinking", {})
+
             # Convert Gemini response to structured detections
             detections = []
             for sig in result.get("signatures", []):
@@ -93,7 +96,8 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
                 "success": True,
                 "detections": detections,
                 "model_used": gemini.model,
-                "total_found": len(detections)
+                "total_found": len(detections),
+                "thinking": thinking_metadata
             }
 
         except Exception as e:

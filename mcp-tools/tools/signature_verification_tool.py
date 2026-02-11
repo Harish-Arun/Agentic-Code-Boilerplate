@@ -108,6 +108,9 @@ def register_signature_verification_tools(mcp: FastMCP, config: AppConfig):
 
             # Parse LLM output into MetricsResult
             metrics = _parse_metrics_response(raw_result)
+            
+            # Extract thinking metadata
+            thinking_metadata = raw_result.get("_thinking", {})
 
             # Debug: Print raw metrics
             print("\n🔍 M1–M7 Metrics from Gemini:")
@@ -182,6 +185,7 @@ def register_signature_verification_tools(mcp: FastMCP, config: AppConfig):
                 "decision": match_score.decision,
                 "final_confidence": match_score.final_confidence,
                 "veto_triggered": match_score.veto.vetoed,
+                "thinking": thinking_metadata
             }
 
         except Exception as e:

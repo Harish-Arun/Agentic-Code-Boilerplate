@@ -178,6 +178,39 @@ async def run_agent_workflow(request: RunWorkflowRequest):
         # Check if workflow is paused (HITL)
         is_paused = result.current_step == "human_review" or getattr(result, 'awaiting_approval', False)
         
+        # Collect thinking traces from all attempts
+        thinking_traces = []
+        for attempt in result.extraction_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "extraction",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        for attempt in result.detection_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "signature_detection",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        for attempt in result.verification_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "verification",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        
         return WorkflowResult(
             document_id=request.document_id,
             thread_id=thread_id,
@@ -187,7 +220,8 @@ async def run_agent_workflow(request: RunWorkflowRequest):
             extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
             signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
             processing_time_ms=100,
-            errors=result.extraction_errors + result.detection_errors + result.verification_errors
+            errors=result.extraction_errors + result.detection_errors + result.verification_errors,
+            thinking_traces=thinking_traces
         )
     except Exception as e:
         import traceback
@@ -218,6 +252,39 @@ async def resume_agent_workflow(request: ResumeWorkflowRequest):
             updated_state=updated_state
         )
         
+        # Collect thinking traces from all attempts
+        thinking_traces = []
+        for attempt in result.extraction_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "extraction",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        for attempt in result.detection_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "signature_detection",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        for attempt in result.verification_attempts:
+            if attempt.thoughts or attempt.thoughts_token_count:
+                thinking_traces.append({
+                    "step": "verification",
+                    "attempt": attempt.attempt_number,
+                    "thoughts": attempt.thoughts,
+                    "thoughts_token_count": attempt.thoughts_token_count,
+                    "thinking_budget_used": attempt.thinking_budget_used,
+                    "timestamp": attempt.timestamp.isoformat() if hasattr(attempt, 'timestamp') else None
+                })
+        
         response = WorkflowResult(
             document_id=result.document_id,
             thread_id=request.thread_id,
@@ -227,7 +294,8 @@ async def resume_agent_workflow(request: ResumeWorkflowRequest):
             extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
             signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
             processing_time_ms=100,
-            errors=result.extraction_errors + result.detection_errors + result.verification_errors
+            errors=result.extraction_errors + result.detection_errors + result.verification_errors,
+            thinking_traces=thinking_traces
         )
         
         # DEBUG: Log complete response before sending

@@ -160,6 +160,7 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
             # Convert to models
             detections = _convert_detections(cropped_detections)
             processing_time = int((time.time() - start_time) * 1000)
+            thinking_metadata = detection_result.get("thinking", {})
 
             # Record successful attempt
             attempt = SignatureDetectionAttempt(
@@ -168,7 +169,10 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
                 detections=detections,
                 model_used=model_used,
                 processing_time_ms=processing_time,
-                raw_response=str(raw_detections)[:2000]
+                raw_response=str(raw_detections)[:2000],
+                thoughts=thinking_metadata.get("thoughts"),
+                thoughts_token_count=thinking_metadata.get("thoughts_token_count"),
+                thinking_budget_used=thinking_metadata.get("thinking_budget_used")
             )
             state.add_detection_attempt(attempt)
 

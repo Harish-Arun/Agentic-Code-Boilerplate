@@ -57,6 +57,7 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
     try:
         async with get_mcp_client() as mcp:
             verifications = []
+            thinking_traces = []  # Collect thinking from all verifications
 
             for idx, detection in enumerate(detections):
                 sig_start = time.time()
@@ -140,6 +141,10 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
                 print("="*80 + "\n")
 
                 if verify_result.get("success"):
+                    # Extract thinking metadata from this verification
+                    if verify_result.get("thinking"):
+                        thinking_traces.append(verify_result.get("thinking"))
+                    
                     verification = _convert_verification(verify_result, detection, idx, reference_blob, reference_mime)
                     verifications.append(verification)
                     state.add_history("verification", "signature_verified", {
@@ -175,13 +180,38 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
                     print(f"  - Scoring: vetoed={ver.scoring_details.get('vetoed')}, final={ver.scoring_details.get('final_score'):.2f}")
             print("="*80 + "\n")
             
+            # Aggregate thinking metadata from all verifications
+            thinking_metadata = {}
+            if thinking_traces:
+                # Combine all thinking traces
+                all_thoughts = []
+                total_thoughts_tokens = 0
+                total_thinking_budget = 0
+                
+                for trace in thinking_traces:
+                    if trace.get("thoughts"):
+                        all_thoughts.extend(trace["thoughts"])
+                    if trace.get("thoughts_token_count"):
+                        total_thoughts_tokens += trace["thoughts_token_count"]
+                    if trace.get("thinking_budget_used"):
+                        total_thinking_budget += trace["thinking_budget_used"]
+                
+                thinking_metadata = {
+                    "thoughts": all_thoughts if all_thoughts else None,
+                    "thoughts_token_count": total_thoughts_tokens if total_thoughts_tokens else None,
+                    "thinking_budget_used": total_thinking_budget if total_thinking_budget else None
+                }
+            
             # Record successful attempt
             attempt = VerificationAttempt(
                 attempt_number=attempt_number,
                 success=True,
                 results=verifications,
                 model_used=config.llm.gemini.model,
-                processing_time_ms=processing_time
+                processing_time_ms=processing_time,
+                thoughts=thinking_metadata.get("thoughts"),
+                thoughts_token_count=thinking_metadata.get("thoughts_token_count"),
+                thinking_budget_used=thinking_metadata.get("thinking_budget_used")
             )
             state.add_verification_attempt(attempt)
 

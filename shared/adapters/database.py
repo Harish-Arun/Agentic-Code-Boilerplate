@@ -85,6 +85,17 @@ class SQLiteAdapter(DatabaseAdapter):
             )
         """)
         await self.connection.commit()
+        
+        # Migration: Add thinking_traces column if it doesn't exist
+        try:
+            await self.connection.execute("""
+                ALTER TABLE documents ADD COLUMN thinking_traces TEXT
+            """)
+            await self.connection.commit()
+            print("✅ Migration: Added thinking_traces column")
+        except Exception:
+            # Column already exists, ignore
+            pass
     
     async def disconnect(self) -> None:
         if self.connection:
@@ -158,8 +169,10 @@ class SQLiteAdapter(DatabaseAdapter):
         params = []
         
         for key, value in updates.items():
-            if key in ["extracted_data", "signature_result"]:
+            if key in ["extracted_data", "signature_result", "thinking_traces"]:
+                original_type = type(value).__name__
                 value = json.dumps(value)
+                print(f"🔧 JSON encoded {key}: {original_type} -> str (length: {len(value)})")
             set_clauses.append(f"{key} = ?")
             params.append(value)
         
