@@ -14,7 +14,7 @@ function Layout({ children }) {
                             <path d="M2 12l10 5 10-5" />
                         </svg>
                     </div>
-                    <span>NNP-AI</span>
+                    <span>MMP-AI</span>
                 </div>
 
                 <nav>

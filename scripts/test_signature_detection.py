@@ -41,21 +41,20 @@ async def test_signature_detection(pdf_path: str):
     print(f"📂 Path: {pdf_file.absolute()}")
     print()
     
-    # Check API key
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ Error: GEMINI_API_KEY not set in environment")
+    # Check enterprise auth
+    if not os.environ.get("GENAI_SERVICE_ACCOUNT") or not os.environ.get("GENAI_SERVICE_ACCOUNT_PASSWORD"):
+        print("❌ Error: GENAI_SERVICE_ACCOUNT and GENAI_SERVICE_ACCOUNT_PASSWORD not set in environment")
         return
     
-    print("✅ Gemini API key configured")
+    print("✅ Enterprise auth configured")
     print()
     
-    # Create adapter
+    # Create adapter - uses get_api_key() internally
     model = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
     print(f"🤖 Using model: {model}")
     print()
     
-    gemini = GeminiRestAdapter(api_key=api_key, model=model)
+    gemini = GeminiRestAdapter(model=model)
     
     print("🔍 Calling Gemini to detect signatures...")
     print()

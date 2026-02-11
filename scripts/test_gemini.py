@@ -2,7 +2,7 @@
 Test script for verifying Gemini REST API integration.
 
 Usage:
-    1. Set GEMINI_API_KEY in .env file
+    1. Set GENAI_SERVICE_ACCOUNT and GENAI_SERVICE_ACCOUNT_PASSWORD in .env file
     2. Run: python scripts/test_gemini.py
 
 This script tests the Gemini REST API adapter without running the full workflow.
@@ -31,13 +31,9 @@ async def test_gemini_text():
     print("Testing Gemini Text Generation")
     print("=" * 60)
     
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ GEMINI_API_KEY not set. Skipping test.")
-        return False
-    
     try:
-        gemini = GeminiRestAdapter(api_key=api_key)
+        # Uses get_api_key() internally with enterprise auth
+        gemini = GeminiRestAdapter()
         response = await gemini.generate(
             "What is 2 + 2? Reply with just the number.",
             system_prompt="You are a helpful assistant."
@@ -99,11 +95,6 @@ async def test_payment_extraction():
     print("Testing Payment Field Extraction from PDF")
     print("=" * 60)
     
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ GEMINI_API_KEY not set. Skipping test.")
-        return False
-    
     # Find a PDF file to test with
     uploads_dir = Path(__file__).parent.parent / "data" / "uploads"
     test_file = None
@@ -119,7 +110,8 @@ async def test_payment_extraction():
         return True
     
     try:
-        gemini = GeminiRestAdapter(api_key=api_key)
+        # Uses get_api_key() internally with enterprise auth
+        gemini = GeminiRestAdapter()
         
         schema = {
             "creditor_name": {"value": "string", "confidence": 0.0},
@@ -187,7 +179,7 @@ async def main():
     print(f"\nTotal: {passed}/{len(results)} tests passed")
     
     if passed < len(results):
-        print("\n⚠️ Some tests failed. Make sure GEMINI_API_KEY is set correctly.")
+        print("\n⚠️ Some tests failed. Make sure GENAI_SERVICE_ACCOUNT and GENAI_SERVICE_ACCOUNT_PASSWORD are set correctly.")
 
 
 if __name__ == "__main__":

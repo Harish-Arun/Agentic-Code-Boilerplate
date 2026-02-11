@@ -76,8 +76,8 @@ async def test_workflow(pdf_path: str):
     
     # Check API key
     if config.llm.provider == "gemini":
-        if not os.environ.get("GEMINI_API_KEY"):
-            print("❌ Error: GEMINI_API_KEY not set in environment")
+        if not os.environ.get("GENAI_SERVICE_ACCOUNT") or not os.environ.get("GENAI_SERVICE_ACCOUNT_PASSWORD"):
+            print("❌ Error: GENAI_SERVICE_ACCOUNT and GENAI_SERVICE_ACCOUNT_PASSWORD not set in environment")
             return False
         print(f"✅ Gemini API key configured")
         print()

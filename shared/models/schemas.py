@@ -178,6 +178,11 @@ class ExtractionAttempt(BaseModel):
     model_used: str = "gemini-3-flash-preview"
     processing_time_ms: int = 0
     raw_response: Optional[str] = None  # For debugging
+    
+    # Thinking traces (Gemini thinking mode)
+    thoughts: Optional[List[str]] = None  # Thought summaries from Gemini
+    thoughts_token_count: Optional[int] = None  # Tokens used for thinking
+    thinking_budget_used: Optional[int] = None  # Actual thinking budget consumed
 
 
 class SignatureDetectionAttempt(BaseModel):
@@ -190,6 +195,11 @@ class SignatureDetectionAttempt(BaseModel):
     model_used: str = "gemini-3-flash-preview"
     processing_time_ms: int = 0
     challenger_feedback: Optional[str] = None  # AI challenger notes
+    
+    # Thinking traces (Gemini thinking mode)
+    thoughts: Optional[List[str]] = None  # Thought summaries from Gemini
+    thoughts_token_count: Optional[int] = None  # Tokens used for thinking
+    thinking_budget_used: Optional[int] = None  # Actual thinking budget consumed
 
 
 class VerificationAttempt(BaseModel):
@@ -204,6 +214,11 @@ class VerificationAttempt(BaseModel):
     errors: List[str] = Field(default_factory=list)
     model_used: str = "gemini-3-flash-preview"
     processing_time_ms: int = 0
+    
+    # Thinking traces (Gemini thinking mode)
+    thoughts: Optional[List[str]] = None  # Thought summaries from Gemini
+    thoughts_token_count: Optional[int] = None  # Tokens used for thinking
+    thinking_budget_used: Optional[int] = None  # Actual thinking budget consumed
 
 
 # ============================================
@@ -295,6 +310,26 @@ class AgentState(BaseModel):
         if not self.detection_attempts:
             return None
         return self.detection_attempts[-1]
+
+
+# ============================================
+# LLM Response Models
+# ============================================
+class LLMThinkingMetadata(BaseModel):
+    """Metadata about LLM thinking process."""
+    thoughts: Optional[List[str]] = None  # Thought summaries (when includeThoughts=true)
+    thoughts_token_count: Optional[int] = None  # Tokens used for thinking
+    thinking_budget_used: Optional[int] = None  # Actual thinking budget consumed
+    total_token_count: Optional[int] = None  # Total tokens (prompt + output + thinking)
+    prompt_token_count: Optional[int] = None  # Input tokens
+    candidates_token_count: Optional[int] = None  # Output tokens
+
+
+class LLMResponse(BaseModel):
+    """Enhanced LLM response with thinking metadata."""
+    text: str  # The actual generated text
+    thinking: Optional[LLMThinkingMetadata] = None  # Thinking traces
+    raw_response: Optional[Dict[str, Any]] = None  # Full API response for debugging
 
 
 # ============================================

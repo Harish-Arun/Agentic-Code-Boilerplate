@@ -56,9 +56,12 @@ Include all visible text, numbers, dates, and labels."""
                 files=[image_path]
             )
             
+            # Extract text from LLMResponse
+            extracted_text = result.text
+            
             return {
                 "success": True,
-                "text": result,
+                "text": extracted_text,
                 "confidence": 0.9,
                 "pages_processed": 1,
                 "format": output_format

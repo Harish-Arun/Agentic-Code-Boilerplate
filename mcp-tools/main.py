@@ -14,7 +14,12 @@ env_file = Path(__file__).parent.parent / ".env"
 if env_file.exists():
     print(f"📋 Loading environment from: {env_file}")
     load_dotenv(env_file)
-    print(f"✅ GEMINI_API_KEY loaded: {'Yes' if os.getenv('GEMINI_API_KEY') else 'No'}")
+    
+    # Check enterprise authentication
+    if os.getenv('GENAI_SERVICE_ACCOUNT') and os.getenv('GENAI_SERVICE_ACCOUNT_PASSWORD'):
+        print(f"✅ Enterprise auth configured: {os.getenv('GENAI_SERVICE_ACCOUNT')}")
+    else:
+        print(f"⚠️  No enterprise authentication configured")
 else:
     print(f"⚠️  No .env file found at {env_file}")
 

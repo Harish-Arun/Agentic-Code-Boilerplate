@@ -12,6 +12,45 @@ import httpx
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 
+from shared.models.schemas import LLMResponse, LLMThinkingMetadata
+
+
+def get_api_key() -> str:
+    """
+    Get API key for Gemini via enterprise token service.
+    
+    Uses environment variables:
+        - GENAI_SERVICE_ACCOUNT
+        - GENAI_SERVICE_ACCOUNT_PASSWORD
+    
+    Returns:
+        API key/token string from enterprise token service
+    """
+    service_account = os.environ.get("GENAI_SERVICE_ACCOUNT")
+    service_password = os.environ.get("GENAI_SERVICE_ACCOUNT_PASSWORD")
+    
+    if not service_account or not service_password:
+        raise ValueError(
+            "Enterprise authentication required. Set both:\n"
+            "  - GENAI_SERVICE_ACCOUNT\n"
+            "  - GENAI_SERVICE_ACCOUNT_PASSWORD"
+        )
+    
+    # TODO: Replace this with actual enterprise token service call
+    # Example:
+    # token_response = requests.post(
+    #     "https://your-enterprise-token-service/api/token",
+    #     json={"account": service_account, "password": service_password}
+    # )
+    # return token_response.json()["access_token"]
+    
+    print(f"🔐 Enterprise auth: {service_account}")
+    print(f"🔑 Fetching token from service...")
+    
+    # TEMPORARY: Simulate token service returning API key for testing
+    # TODO: Replace with actual token service implementation before production
+    return "AIzaSyAMM5dkjp8nP142v-YpHDqBem1YtA5-fhM"
+
 
 class GeminiRestAdapter:
     """
@@ -29,17 +68,89 @@ class GeminiRestAdapter:
     def __init__(
         self,
         api_key: str = None,
-        model: str = "gemini-1.5-flash",  # Valid stable model
-        temperature: float = 0.0,  # 0 for deterministic, consistent output
-        max_tokens: int = 16384  # Increased to prevent truncation in M1-M7 responses
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        top_k: int = None,
+        top_p: float = None,
+        candidate_count: int = None,
+        thinking_budget: int = None,
+        thinking_level: str = None,
+        include_thoughts: bool = None
     ):
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        """
+        Initialize Gemini adapter.
+        
+        Args:
+            api_key: Optional API key (uses get_api_key() if not provided)
+            model: Model name (default from env or gemini-3-flash-preview)
+            temperature: Sampling temperature (default 0.0)
+            max_tokens: Max output tokens (default None = unlimited)
+            top_k: Top-K sampling (default 1)
+            top_p: Top-P sampling (default 0.1)
+            candidate_count: Number of response candidates (default 1)
+            thinking_budget: Thinking tokens budget (default -1 = dynamic)
+                            -1 = dynamic thinking, 0 = off, >0 = specific token count
+                            For Gemini 2.5 series: 0-24576
+            thinking_level: Thinking level for Gemini 3 (minimal, low, medium, high)
+            include_thoughts: Include thought summaries in response (default False)
+        """
+        self.api_key = api_key or get_api_key()
+        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+        self.temperature = temperature if temperature is not None else float(os.environ.get("GEMINI_TEMPERATURE", 0.0))
+        self.max_tokens = max_tokens if max_tokens is not None else (int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS")) if os.environ.get("GEMINI_MAX_OUTPUT_TOKENS") else None)
+        self.top_k = top_k if top_k is not None else int(os.environ.get("GEMINI_TOP_K", 1))
+        self.top_p = top_p if top_p is not None else float(os.environ.get("GEMINI_TOP_P", 0.1))
+        self.candidate_count = candidate_count if candidate_count is not None else int(os.environ.get("GEMINI_CANDIDATE_COUNT", 1))
+        
+        # Thinking configuration
+        self.thinking_budget = thinking_budget if thinking_budget is not None else (int(os.environ.get("GEMINI_THINKING_BUDGET", -1)))
+        self.thinking_level = thinking_level or os.environ.get("GEMINI_THINKING_LEVEL")
+        self.include_thoughts = include_thoughts if include_thoughts is not None else os.environ.get("GEMINI_INCLUDE_THOUGHTS", "false").lower() == "true"
         
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY is required. Set it in environment or pass to constructor.")
+            raise ValueError("Failed to obtain API key. Check authentication configuration.")
+    
+    def _extract_thinking_metadata(self, result: Dict[str, Any]) -> Optional[LLMThinkingMetadata]:
+        """Extract thinking metadata from Gemini API response."""
+        try:
+            usage_metadata = result.get("usageMetadata", {})
+            candidates = result.get("candidates", [])
+            
+            if not candidates:
+                return None
+            
+            # Extract thought summaries if available
+            thoughts = []
+            candidate = candidates[0]
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+            
+            for part in parts:
+                if "thought" in part:
+                    thoughts.append(part["thought"])
+            
+            # Extract token usage
+            thoughts_token_count = usage_metadata.get("thoughtsTokenCount")
+            total_token_count = usage_metadata.get("totalTokenCount")
+            prompt_token_count = usage_metadata.get("promptTokenCount")
+            candidates_token_count = usage_metadata.get("candidatesTokenCount")
+            
+            # Only create metadata object if we have thinking data
+            if thoughts or thoughts_token_count:
+                return LLMThinkingMetadata(
+                    thoughts=thoughts if thoughts else None,
+                    thoughts_token_count=thoughts_token_count,
+                    thinking_budget_used=thoughts_token_count,  # Same as token count
+                    total_token_count=total_token_count,
+                    prompt_token_count=prompt_token_count,
+                    candidates_token_count=candidates_token_count
+                )
+            
+            return None
+        except Exception as e:
+            print(f"Warning: Could not extract thinking metadata: {e}")
+            return None
     
     def _get_mime_type(self, file_path: str) -> str:
         """Determine MIME type from file extension."""
@@ -90,12 +201,32 @@ class GeminiRestAdapter:
             "parts": [{"text": prompt}]
         })
         
+        generation_config = {
+            "temperature": self.temperature,
+            "topK": self.top_k,
+            "topP": self.top_p,
+            "candidateCount": self.candidate_count
+        }
+        
+        # Add maxOutputTokens only if specified
+        if self.max_tokens:
+            generation_config["maxOutputTokens"] = self.max_tokens
+        
+        # Add thinking configuration
+        thinking_config = {}
+        if self.thinking_budget is not None:
+            thinking_config["thinkingBudget"] = self.thinking_budget
+        if self.thinking_level:
+            thinking_config["thinkingLevel"] = self.thinking_level
+        if self.include_thoughts:
+            thinking_config["includeThoughts"] = True
+        
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
+        
         payload = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": self.temperature,
-                "maxOutputTokens": self.max_tokens,
-            }
+            "generationConfig": generation_config
         }
         
         # Retry logic for rate limits
@@ -116,8 +247,24 @@ class GeminiRestAdapter:
                     response.raise_for_status()
                     result = response.json()
                 
-                # Extract text from response
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+                # Extract text and thinking metadata
+                text = result["candidates"][0]["content"]["parts"][0]["text"]
+                thinking = self._extract_thinking_metadata(result)
+                
+                return LLMResponse(
+                    text=text,
+                    thinking=thinking,
+                    raw_response=result if thinking and thinking.thoughts else None
+                )
+                
+                # Extract thinking metadata
+                thinking = self._extract_thinking_metadata(result)
+                
+                return LLMResponse(
+                    text=text,
+                    thinking=thinking,
+                    raw_response=result if thinking and thinking.thoughts else None
+                )
             
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < max_retries - 1:
@@ -198,12 +345,32 @@ class GeminiRestAdapter:
             "parts": parts
         })
         
+        generation_config = {
+            "temperature": self.temperature,
+            "topK": self.top_k,
+            "topP": self.top_p,
+            "candidateCount": self.candidate_count
+        }
+        
+        # Add maxOutputTokens only if specified
+        if self.max_tokens:
+            generation_config["maxOutputTokens"] = self.max_tokens
+        
+        # Add thinking configuration
+        thinking_config = {}
+        if self.thinking_budget is not None:
+            thinking_config["thinkingBudget"] = self.thinking_budget
+        if self.thinking_level:
+            thinking_config["thinkingLevel"] = self.thinking_level
+        if self.include_thoughts:
+            thinking_config["includeThoughts"] = True
+        
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
+        
         payload = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": self.temperature,
-                "maxOutputTokens": self.max_tokens,
-            }
+            "generationConfig": generation_config
         }
         
         # Retry logic for rate limits
@@ -224,7 +391,17 @@ class GeminiRestAdapter:
                     response.raise_for_status()
                     result = response.json()
                 
-                return result["candidates"][0]["content"]["parts"][0]["text"]
+                # Extract text from response
+                text = result["candidates"][0]["content"]["parts"][0]["text"]
+                
+                # Extract thinking metadata
+                thinking = self._extract_thinking_metadata(result)
+                
+                return LLMResponse(
+                    text=text,
+                    thinking=thinking,
+                    raw_response=result if thinking and thinking.thoughts else None
+                )
             
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < max_retries - 1:
@@ -262,10 +439,14 @@ The JSON should match this structure:
 
 Respond with ONLY the JSON object, nothing else."""
 
+        # Call the appropriate generate function
         if files:
-            response = await self.generate_with_vision(structured_prompt, files, system_prompt)
+            llm_response = await self.generate_with_vision(structured_prompt, files, system_prompt)
         else:
-            response = await self.generate(structured_prompt, system_prompt)
+            llm_response = await self.generate(structured_prompt, system_prompt)
+        
+        # Extract just the text for JSON parsing
+        response = llm_response.text
         
         # Clean response - remove markdown code blocks if present
         clean_response = response.strip()
@@ -540,12 +721,19 @@ def get_gemini_adapter(config=None) -> GeminiRestAdapter:
     """
     if config and hasattr(config, 'llm') and config.llm.provider == "gemini":
         gemini_cfg = config.llm.gemini
+        
         return GeminiRestAdapter(
-            api_key=gemini_cfg.api_key or os.environ.get("GEMINI_API_KEY"),
+            api_key=None,  # Always use get_api_key() for enterprise auth
             model=gemini_cfg.model,
-            temperature=gemini_cfg.temperature,
-            max_tokens=gemini_cfg.max_tokens
+            temperature=getattr(gemini_cfg, 'temperature', None),
+            max_tokens=getattr(gemini_cfg, 'max_tokens', None),
+            top_k=getattr(gemini_cfg, 'top_k', None),
+            top_p=getattr(gemini_cfg, 'top_p', None),
+            candidate_count=getattr(gemini_cfg, 'candidate_count', None),
+            thinking_budget=getattr(gemini_cfg, 'thinking_budget', None),
+            thinking_level=getattr(gemini_cfg, 'thinking_level', None),
+            include_thoughts=getattr(gemini_cfg, 'include_thoughts', None)
         )
     
-    # Default from environment
+    # Default from environment (uses get_api_key() internally)
     return GeminiRestAdapter()

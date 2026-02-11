@@ -80,7 +80,8 @@ class SQLiteAdapter(DatabaseAdapter):
                 extracted_data TEXT,
                 signature_result TEXT,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                thinking_traces TEXT
             )
         """)
         await self.connection.commit()
@@ -96,19 +97,20 @@ class SQLiteAdapter(DatabaseAdapter):
         await self.connection.execute(
             """
             INSERT INTO documents (id, source, uploaded_by, status, raw_file_path, 
-                                   extracted_data, signature_result, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   extracted_data, signature_result, created_at, updated_at, thinking_traces)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 doc_id,
-                document.get("source", "manual"),
-                document.get("uploaded_by", "system"),
+                document.get("source"),
+                document.get("uploaded_by"),
                 document.get("status", "INGESTED"),
-                document.get("raw_file_path", ""),
+                document.get("raw_file_path"),
                 json.dumps(document.get("extracted_data", {})),
                 json.dumps(document.get("signature_result", {})),
                 now,
-                now
+                now,
+                json.dumps(document.get("thinking_traces", []))
             )
         )
         await self.connection.commit()
@@ -189,7 +191,8 @@ class SQLiteAdapter(DatabaseAdapter):
             "extracted_data": json.loads(row[5]) if row[5] else {},
             "signature_result": json.loads(row[6]) if row[6] else {},
             "created_at": row[7],
-            "updated_at": row[8]
+            "updated_at": row[8],
+            "thinking_traces": json.loads(row[9]) if len(row) > 9 and row[9] else []
         }
 
 

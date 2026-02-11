@@ -52,21 +52,25 @@ class DatabaseConfig(BaseModel):
 # LLM Config Models
 # ============================================
 class GeminiConfig(BaseModel):
-    api_key: str = ""
-    model: str = "gemini-2.5-pro"
+    model: str = "gemini-3-flash-preview"
     temperature: float = 0.0
-    max_tokens: int = 16384
+    max_tokens: Optional[int] = None  # None = unlimited
+    top_k: int = 1
+    top_p: float = 0.1
+    candidate_count: int = 1
+    # Thinking configuration
+    thinking_budget: Optional[int] = -1  # -1=dynamic, 0=off, >0=specific tokens
+    thinking_level: Optional[str] = None  # minimal, low, medium, high (Gemini 3)
+    include_thoughts: bool = False  # Include thought summaries in response
 
 
 class OpenAIConfig(BaseModel):
-    api_key: str = ""
     model: str = "gpt-4"
     temperature: float = 0.1
 
 
 class AzureConfig(BaseModel):
     endpoint: str = ""
-    api_key: str = ""
     deployment: str = ""
     api_version: str = "2024-02-15-preview"
 
