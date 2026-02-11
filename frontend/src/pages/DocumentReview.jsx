@@ -328,7 +328,7 @@ function DocumentReview() {
                                     marginBottom: 'var(--spacing-lg)',
                                     fontSize: '1.25rem',
                                     fontWeight: 700,
-                                    color: '#1f2937',
+                                    color: '#ffffff',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '10px'
