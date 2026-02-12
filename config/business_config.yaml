@@ -171,33 +171,52 @@ prompts:
   # Signature detection prompt
   signature_detection:
     system: |
-      You are a forensic document examiner specialized in detecting signatures and handwritten elements.
-    user: |
-      Analyze this document and detect ALL signatures present.
+      You are a document signature identifier. Find ONLY the signature box - the specific field where a person signs their name.
       
-      IMPORTANT RULES:
-      1. Only detect ACTUAL HANDWRITTEN SIGNATURES (ink on paper)
-      2. DO NOT mark empty signature boxes or fields as signatures
-      3. DO NOT mark date fields or date signature areas as signatures
-      4. DO NOT mark printed text or typed names as signatures
-      5. Ignore signature labels like "Signature:", "Authorized by:", etc.
+      **What to detect:**
+      The SIGNATURE BOX ONLY - the rectangular area designated for the handwritten signature, typically:
+      - A box with borders labeled "Signature" or "Sign here"
+      - A line with "Signature:" label
+      - The area containing the handwritten signature
       
-      **CRITICAL: Use NORMALIZED coordinates (0.0 to 1.0)**
+      **CRITICAL: Only return boxes with actual handwritten signatures**
+      If a signature box is EMPTY (no handwriting inside), do NOT return it.
+      Only return signature boxes that contain visible handwritten signatures.
+      
+      **Exclude adjacent fields:**
+      Do NOT include:
+      - Date fields (even if next to signature)
+      - Time fields
+      - Name fields (printed name separate from signature)
+      - Any other form fields
+      - Empty signature boxes
+      
+      Return ONLY the box where the person physically signed their signature.
+      
+      **Use NORMALIZED coordinates (0.0 to 1.0)**
       Do NOT use pixel coordinates. Use normalized values:
       - 0.0 = left/top edge of page
       - 1.0 = right/bottom edge of page
       - Example: [0.1, 0.5, 0.4, 0.6] NOT [100, 500, 400, 600]
       
-      For each ACTUAL signature found:
-      - signature_id: unique identifier (e.g., "sig_1", "sig_2")
-      - page_number: page number where signature appears (1-indexed)
-      - bounding_box: [x_min, y_min, x_max, y_max] NORMALIZED 0.0-1.0 (NOT pixels!)
-      - signer_name: name of the signer if identifiable from context
-      - signature_type: "customer" | "bank_initiator" | "bank_authenticator" | "unknown"
-      - confidence: your confidence this is a real signature (0.0-1.0)
-      - description: brief description of signature location
+      **Output for each signature box:**
+      {
+        "page_number": 1,
+        "signer_name": "Printed name if visible nearby, or null",
+        "bounding_box": [x_min, y_min, x_max, y_max],
+        "signature_type": "customer" | "bank_initiator" | "bank_authenticator" | "unknown",
+        "confidence": 0.0-1.0,
+        "description": "Brief location description"
+      }
       
       Coordinates MUST be normalized 0.0-1.0 (decimals, not pixels).
+      Return empty list if no signed signature boxes found.
+    user: |
+      Find signature boxes that contain handwritten signatures.
+      
+      Ignore empty signature boxes. Return ONLY boxes where someone has actually signed - exclude date fields, time fields, or any other adjacent form fields.
+      
+      Use normalized coordinates (0.0-1.0). Return empty list if no actual signatures are present.
       Return empty list if NO ACTUAL SIGNATURES are present (only empty boxes).
 
   # Signature verification prompt with M1-M7 forensic framework

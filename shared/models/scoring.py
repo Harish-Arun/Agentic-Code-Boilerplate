@@ -40,6 +40,13 @@ def calculate_confidence_fiv1(
         SignatureMatchScore with complete breakdown.
     """
     cfg = thresholds or MetricThresholds()
+    
+    # Debug: Show which thresholds are being used
+    print(f"\n📊 FIV 1.0 Scoring Engine - Using Thresholds:")
+    print(f"   M1 tolerance={cfg.m1_tolerance}, veto={cfg.m1_veto}, weight={cfg.m1_weight}")
+    print(f"   M3 tolerance={cfg.m3_tolerance}°, veto={cfg.m3_veto}°, weight={cfg.m3_weight}")
+    print(f"   Starting score: 100.0\n")
+    
     score = 100.0
     penalties: list[ScoringEntry] = []
     bonuses: list[ScoringEntry] = []
@@ -108,6 +115,7 @@ def calculate_confidence_fiv1(
     # ------------------------------------------------------------------
     # 2. PENALTY CALCULATION
     # ------------------------------------------------------------------
+    print(f"📊 Applying Penalties (based on business_config.yaml thresholds):")
 
     # M1 Global Form
     m1_delta = metrics.m1_global_form.aspect_ratio_delta
@@ -120,6 +128,9 @@ def calculate_confidence_fiv1(
             points=-penalty,
             reason=f"delta={m1_delta:.3f} exceeds tolerance={cfg.m1_tolerance}",
         ))
+        print(f"   \u274c M1: delta={m1_delta:.3f} > {cfg.m1_tolerance} \u2192 penalty={penalty:.1f} (weight={cfg.m1_weight})")
+    else:
+        print(f"   \u2705 M1: delta={m1_delta:.3f} \u2264 {cfg.m1_tolerance} \u2192 no penalty")
 
     # M2 Visual Tremor
     if metrics.m2_line_quality.tremor_detected:
@@ -141,6 +152,9 @@ def calculate_confidence_fiv1(
             points=-penalty,
             reason=f"delta={m3_delta:.1f}° exceeds tolerance={cfg.m3_tolerance}°",
         ))
+        print(f"   ❌ M3: delta={m3_delta:.1f}° > {cfg.m3_tolerance}° → penalty={penalty:.1f} (weight={cfg.m3_weight})")
+    else:
+        print(f"   ✅ M3: delta={m3_delta:.1f}° ≤ {cfg.m3_tolerance}° → no penalty")
 
     # M4 Baseline
     m4_drift = metrics.m4_baseline_stability.drift_delta
@@ -207,6 +221,15 @@ def calculate_confidence_fiv1(
         if penalties
         else f"Score {final_score:.1f}/100 — all metrics within thresholds"
     )
+    
+    # Log final decision based on business config thresholds
+    print(f"\n📊 Final Score: {final_score:.1f}/100")
+    print(f"   Total penalties applied: {len(penalties)} (total: -{total_penalties:.1f} points)")
+    print(f"   Decision thresholds from business_config.yaml:")
+    print(f"     • APPROVE: ≥{cfg.approve_threshold}")
+    print(f"     • FLAG: {cfg.flag_min_threshold}-{cfg.approve_threshold-1}")
+    print(f"     • REJECT: <{cfg.flag_min_threshold}")
+    print(f"   → Decision: {decision} ({confidence_band})\n")
 
     return _build_result(
         metrics=metrics,

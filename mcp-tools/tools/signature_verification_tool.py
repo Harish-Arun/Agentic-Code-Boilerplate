@@ -94,6 +94,22 @@ def register_signature_verification_tools(mcp: FastMCP, config: AppConfig):
                 if hasattr(prompts_cfg, 'signature_verification') and hasattr(prompts_cfg.signature_verification, 'system'):
                     system_prompt = prompts_cfg.signature_verification.system
                     user_prompt = prompts_cfg.signature_verification.user
+                    
+                    # Debug: Show that business_config prompts are being used
+                    print(f"\n{'='*80}")
+                    print(f"📝 USING PROMPTS FROM business_config.yaml")
+                    print(f"{'='*80}")
+                    print(f"System Prompt (first 150 chars):")
+                    print(f"   {system_prompt[:150]}...")
+                    print(f"\nUser Prompt (first 200 chars):")
+                    print(f"   {user_prompt[:200]}...")
+                    print(f"{'='*80}\n")
+                else:
+                    print(f"\n⚠️  WARNING: signature_verification prompts not found in business_config.yaml")
+                    print(f"   Using default prompts instead.\n")
+            else:
+                print(f"\n⚠️  WARNING: business.prompts not found in config")
+                print(f"   Using default prompts instead.\n")
 
             # Call Gemini with M1–M7 prompt
             if ref_input:
@@ -289,13 +305,19 @@ def _load_thresholds(config: AppConfig) -> MetricThresholds:
     """Load metric thresholds from business config if available."""
     try:
         biz = config.business.metric_thresholds
-        return MetricThresholds(
+        thresholds = MetricThresholds(
             m1_tolerance=biz.m1_tolerance,
             m1_veto=biz.m1_veto,
             m3_tolerance=biz.m3_tolerance,
             m3_veto=biz.m3_veto,
         )
-    except Exception:
+        print(f"\n🔧 Using Business Config Thresholds:")
+        print(f"   M1: tolerance={thresholds.m1_tolerance}, veto={thresholds.m1_veto}")
+        print(f"   M3: tolerance={thresholds.m3_tolerance}°, veto={thresholds.m3_veto}°\n")
+        return thresholds
+    except Exception as e:
+        print(f"\n⚠️  Failed to load business config thresholds: {e}")
+        print(f"   Using default thresholds instead.\n")
         return MetricThresholds()
 
 

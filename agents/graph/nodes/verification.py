@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "shared"))
 
 from models import (
     AgentState, SignatureVerification, SimilarityFactors,
-    VerificationAttempt
+    VerificationAttempt, ReferenceSignature
 )
 from config import AppConfig
 from mcp_client import get_mcp_client, call_tool_on_session
@@ -145,7 +145,14 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
                     if verify_result.get("thinking"):
                         thinking_traces.append(verify_result.get("thinking"))
                     
-                    verification = _convert_verification(verify_result, detection, idx, reference_blob, reference_mime)
+                    verification = _convert_verification(
+                        verify_result, 
+                        detection, 
+                        idx, 
+                        reference_blob, 
+                        reference_mime,
+                        customer_id
+                    )
                     verifications.append(verification)
                     state.add_history("verification", "signature_verified", {
                         "index": idx,
@@ -249,7 +256,14 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
     return state
 
 
-def _convert_verification(result: dict, detection, idx: int, reference_blob: str = None, reference_mime: str = None) -> SignatureVerification:
+def _convert_verification(
+    result: dict, 
+    detection, 
+    idx: int, 
+    reference_blob: str = None, 
+    reference_mime: str = None,
+    customer_id: str = None
+) -> SignatureVerification:
     """Convert MCP verify_signature response to SignatureVerification model."""
     # The MCP tool returns a 'verification' dict that already matches the model
     verification_data = result.get("verification", {})
@@ -284,22 +298,35 @@ def _convert_verification(result: dict, detection, idx: int, reference_blob: str
             "audit_summary": metrics_score.get("audit_summary", {})
         }
     
+    # Build reference signatures list
+    reference_signatures = []
+    if reference_blob:
+        ref_sig = ReferenceSignature(
+            reference_id=customer_id or f"ref_{idx}",
+            blob=reference_blob,
+            mime_type=reference_mime or "image/png",
+            customer_id=customer_id,
+            match_score=float(verification_data.get("confidence", 0.0))
+        )
+        reference_signatures.append(ref_sig)
+    
     sig_verification = SignatureVerification(
         match=verification_data.get("match", False),
         confidence=float(verification_data.get("confidence", 0.0)),
         reasoning=verification_data.get("reasoning", ""),
-        reference_signature_id=detection.signature_id or f"sig_{idx}",
+        reference_signature_id=customer_id or f"ref_{idx}",
         similarity_factors=SimilarityFactors(**verification_data.get("similarity_factors", {})) if verification_data.get("similarity_factors") else None,
         risk_indicators=verification_data.get("risk_indicators", []),
         recommendation=verification_data.get("recommendation", "MANUAL_REVIEW"),
         signature_blob=detection.image_blob,
-        reference_blob=reference_blob,  # Now passed from reference lookup
+        reference_blob=reference_blob,  # Keep for backward compatibility
         blob_mime_type=detection.blob_mime_type or "image/png",
+        reference_signatures=reference_signatures,  # New list structure
         metrics=metrics_dict,
         scoring_details=scoring_details
     )
     
-    print(f"🔍 DEBUG: Created SignatureVerification with reference_blob={'present' if reference_blob else 'MISSING'}")
+    print(f"🔍 DEBUG: Created SignatureVerification with {len(reference_signatures)} reference signature(s)")
     return sig_verification
 
 

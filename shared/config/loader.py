@@ -380,22 +380,93 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     
     # Load app config (infrastructure)
     if config_file.exists():
+        print(f"\n{'='*80}")
+        print(f"📋 LOADING APP CONFIG: {config_file}")
+        print(f"{'='*80}")
         with open(config_file, "r") as f:
             raw_app = yaml.safe_load(f) or {}
         config_data.update(_substitute_env_vars(raw_app))
+        
+        # Log LLM configuration
+        if "llm" in config_data:
+            llm_cfg = config_data["llm"]
+            provider = llm_cfg.get("provider", "unknown")
+            print(f"\n✅ LLM Configuration:")
+            print(f"   Provider: {provider}")
+            
+            if provider == "gemini" and "gemini" in llm_cfg:
+                gemini = llm_cfg["gemini"]
+                print(f"   Model: {gemini.get('model', 'not set')}")
+                print(f"   Temperature: {gemini.get('temperature', 'not set')}")
+                print(f"   Top-K: {gemini.get('top_k', 'not set')}")
+                print(f"   Top-P: {gemini.get('top_p', 'not set')}")
+                print(f"   Thinking Budget: {gemini.get('thinking_budget', 'not set')}")
+        print(f"{'='*80}\n")
     
     # Load business config (rules & thresholds)
     business_file = Path(business_config_path)
     if business_file.exists():
+        print(f"\n{'='*80}")
+        print(f"📋 LOADING BUSINESS CONFIG: {business_file}")
+        print(f"{'='*80}")
         with open(business_file, "r") as f:
             raw_biz = yaml.safe_load(f) or {}
         biz_data = _substitute_env_vars(raw_biz)
+        
+        # Log key business config values
+        if "metric_thresholds" in biz_data:
+            thresholds = biz_data["metric_thresholds"]
+            print(f"\n✅ Business Config Loaded Successfully:")
+            print(f"   M1 tolerance: {thresholds.get('m1_tolerance')} (veto: {thresholds.get('m1_veto')})")
+            print(f"   M3 tolerance: {thresholds.get('m3_tolerance')}° (veto: {thresholds.get('m3_veto')}°)")
+            print(f"   M1 weight: {thresholds.get('m1_weight')}")
+            print(f"   M3 weight: {thresholds.get('m3_weight')}")
+        
+        if "decision_thresholds" in biz_data:
+            decisions = biz_data["decision_thresholds"]
+            print(f"\n   Approve threshold: {decisions.get('approve_threshold')}")
+            print(f"   Flag threshold: {decisions.get('flag_min_threshold')}")
+        
+        if "prompts" in biz_data:
+            prompts = biz_data["prompts"]
+            print(f"\n✅ Prompts Loaded:")
+            
+            # Extraction prompts
+            if "extraction" in prompts:
+                ext_prompt = prompts["extraction"]
+                sys_len = len(ext_prompt.get("system", "")) if isinstance(ext_prompt, dict) else 0
+                user_len = len(ext_prompt.get("user", "")) if isinstance(ext_prompt, dict) else 0
+                print(f"   extraction: system={sys_len} chars, user={user_len} chars")
+            
+            # Signature detection prompts
+            if "signature_detection" in prompts:
+                det_prompt = prompts["signature_detection"]
+                sys_len = len(det_prompt.get("system", "")) if isinstance(det_prompt, dict) else 0
+                user_len = len(det_prompt.get("user", "")) if isinstance(det_prompt, dict) else 0
+                print(f"   signature_detection: system={sys_len} chars, user={user_len} chars")
+            
+            # Signature verification prompts
+            if "signature_verification" in prompts:
+                sig_prompt = prompts["signature_verification"]
+                sys_len = len(sig_prompt.get("system", "")) if isinstance(sig_prompt, dict) else 0
+                user_len = len(sig_prompt.get("user", "")) if isinstance(sig_prompt, dict) else 0
+                print(f"   signature_verification: system={sys_len} chars, user={user_len} chars")
+                if user_len > 0:
+                    user_text = sig_prompt.get("user", "")
+                    has_m1_m7 = "M1" in user_text and "M7" in user_text
+                    print(f"   → M1-M7 framework: {'✓ YES' if has_m1_m7 else '✗ NO'}")
+        
+        print(f"{'='*80}\n")
+        
         config_data["business"] = biz_data
         # Backward-compat: also set top-level prompts & document_states
         if "prompts" in biz_data:
             config_data["prompts"] = biz_data["prompts"]
         if "document_states" in biz_data:
             config_data["document_states"] = biz_data["document_states"]
+    else:
+        print(f"\n⚠️  WARNING: Business config file not found: {business_file}")
+        print(f"   Using default thresholds instead.\n")
     
     if config_data:
         return AppConfig(**config_data)

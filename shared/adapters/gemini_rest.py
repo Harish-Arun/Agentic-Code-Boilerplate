@@ -35,7 +35,7 @@ def get_api_key() -> str:
             "  - GENAI_SERVICE_ACCOUNT\n"
             "  - GENAI_SERVICE_ACCOUNT_PASSWORD"
         )
-    
+    token = os.environ.get("GEMINI_API_KEY")
     # TODO: Replace this with actual enterprise token service call
     # Example:
     # token_response = requests.post(
@@ -49,7 +49,7 @@ def get_api_key() -> str:
     
     # TEMPORARY: Simulate token service returning API key for testing
     # TODO: Replace with actual token service implementation before production
-    return None
+    return token
 
 
 class GeminiRestAdapter:
@@ -113,6 +113,25 @@ class GeminiRestAdapter:
         
         if not self.api_key:
             raise ValueError("Failed to obtain API key. Check authentication configuration.")
+        
+        # Log model configuration
+        print(f"\n{'='*80}")
+        print(f"🤖 GEMINI MODEL LOADED")
+        print(f"{'='*80}")
+        print(f"Model: {self.model}")
+        model_source = "config" if model else ("env:GEMINI_MODEL" if os.environ.get("GEMINI_MODEL") else "default")
+        print(f"Source: {model_source}")
+        print(f"\nHyperparameters:")
+        print(f"   Temperature: {self.temperature}")
+        print(f"   Max Tokens: {self.max_tokens or 'unlimited'}")
+        print(f"   Top-K: {self.top_k}")
+        print(f"   Top-P: {self.top_p}")
+        print(f"   Candidate Count: {self.candidate_count}")
+        print(f"\nThinking Config:")
+        print(f"   Budget: {self.thinking_budget} (-1=dynamic, 0=off, >0=tokens)")
+        print(f"   Level: {self.thinking_level or 'not set'}")
+        print(f"   Include Thoughts: {self.include_thoughts}")
+        print(f"{'='*80}\n")
     
     def _extract_thinking_metadata(self, result: Dict[str, Any]) -> Optional[LLMThinkingMetadata]:
         """Extract thinking metadata from Gemini API response."""
@@ -531,6 +550,20 @@ Respond with ONLY the JSON object, nothing else."""
         # Use provided prompts or fallback to basic defaults
         _system_prompt = system_prompt or "You are a payment document extraction specialist. Be precise and accurate."
         _user_prompt = user_prompt or """Extract payment fields from this document with confidence scores."""
+        
+        # Debug: Log which prompts are being used
+        if system_prompt:
+            print(f"\n🤖 Gemini API [EXTRACTION] - Using CUSTOM system prompt from business_config.yaml:")
+            print(f"   Length: {len(system_prompt)} chars")
+            print(f"   First line: {system_prompt.split(chr(10))[0][:80]}...")
+        else:
+            print(f"\n⚠️  Gemini API [EXTRACTION] - Using DEFAULT system prompt")
+        
+        if user_prompt:
+            print(f"   Using CUSTOM user prompt from business_config.yaml:")
+            print(f"   Length: {len(user_prompt)} chars\n")
+        else:
+            print(f"   Using DEFAULT user prompt\n")
 
         schema = {
             "creditor_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
@@ -590,6 +623,20 @@ Respond with ONLY the JSON object, nothing else."""
         # Use provided prompts or fallback to basic defaults
         _system_prompt = system_prompt or "You are a document signature identifier."
         _user_prompt = user_prompt or """Detect signature regions in this document."""
+        
+        # Debug: Log which prompts are being used
+        if system_prompt:
+            print(f"\n🤖 Gemini API [DETECTION] - Using CUSTOM system prompt from business_config.yaml:")
+            print(f"   Length: {len(system_prompt)} chars")
+            print(f"   First line: {system_prompt.split(chr(10))[0][:80]}...")
+        else:
+            print(f"\n⚠️  Gemini API [DETECTION] - Using DEFAULT system prompt")
+        
+        if user_prompt:
+            print(f"   Using CUSTOM user prompt from business_config.yaml:")
+            print(f"   Length: {len(user_prompt)} chars\n")
+        else:
+            print(f"   Using DEFAULT user prompt\n")
 
         schema = {
             "signatures": [
@@ -658,6 +705,22 @@ Respond with ONLY the JSON object, nothing else."""
         # Use provided prompts or fallback to basic defaults
         _system_prompt = system_prompt or "You are a forensic signature analysis expert."
         _user_prompt = user_prompt or """Compare these two signatures using forensic metrics."""
+        
+        # Debug: Log which prompts are being used
+        if system_prompt:
+            print(f"\n🤖 Gemini API - Using CUSTOM system prompt from business_config.yaml:")
+            print(f"   Length: {len(system_prompt)} chars")
+            print(f"   First line: {system_prompt.split(chr(10))[0][:80]}...")
+        else:
+            print(f"\n⚠️  Gemini API - Using DEFAULT system prompt (business_config not loaded)")
+        
+        if user_prompt:
+            print(f"   Using CUSTOM user prompt from business_config.yaml:")
+            print(f"   Length: {len(user_prompt)} chars")
+            print(f"   Includes M1-M7?: {'M1' in user_prompt and 'M7' in user_prompt}")
+            print()
+        else:
+            print(f"   Using DEFAULT user prompt (business_config not loaded)\n")
 
         schema = {
             "M1_global_form": {
@@ -760,6 +823,9 @@ def get_gemini_adapter(config=None) -> GeminiRestAdapter:
     """
     if config and hasattr(config, 'llm') and config.llm.provider == "gemini":
         gemini_cfg = config.llm.gemini
+        print(f"\n📥 Loading Gemini adapter from app_config.yaml")
+        print(f"   Provider: {config.llm.provider}")
+        print(f"   Model: {gemini_cfg.model}\n")
         
         return GeminiRestAdapter(
             api_key=None,  # Always use get_api_key() for enterprise auth
@@ -775,4 +841,5 @@ def get_gemini_adapter(config=None) -> GeminiRestAdapter:
         )
     
     # Default from environment (uses get_api_key() internally)
+    print(f"\n📥 Loading Gemini adapter from environment variables")
     return GeminiRestAdapter()

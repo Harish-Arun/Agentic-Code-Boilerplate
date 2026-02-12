@@ -116,19 +116,30 @@ class SimilarityFactors(BaseModel):
     unique_characteristics: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ReferenceSignature(BaseModel):
+    """Reference signature data used in comparison."""
+    reference_id: str
+    blob: str  # base64 encoded image
+    mime_type: str = "image/png"
+    customer_id: Optional[str] = None
+    match_score: Optional[float] = None  # Individual match score if multiple references compared
+
+
 class SignatureVerification(BaseModel):
     """Signature verification result."""
     match: bool
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
-    reference_signature_id: Optional[str] = None
+    reference_signature_id: Optional[str] = None  # Primary reference used (backward compatibility)
     similarity_factors: Optional[SimilarityFactors] = None
     risk_indicators: List[str] = Field(default_factory=list)
     recommendation: str = "MANUAL_REVIEW"  # APPROVE, REJECT, MANUAL_REVIEW
     # Blob references for audit trail
     signature_blob: Optional[str] = None    # base64 questioned signature used
-    reference_blob: Optional[str] = None    # base64 reference signature used
+    reference_blob: Optional[str] = None    # base64 single reference (backward compatibility)
     blob_mime_type: str = "image/png"       # MIME type of the blobs
+    # Multiple reference signatures support
+    reference_signatures: List[ReferenceSignature] = Field(default_factory=list)
     # FIV 1.0 detailed scoring (for frontend metrics display)
     metrics: Optional[Dict[str, Any]] = None  # M1-M7 metric breakdown
     scoring_details: Optional[Dict[str, Any]] = None  # FIV scoring details

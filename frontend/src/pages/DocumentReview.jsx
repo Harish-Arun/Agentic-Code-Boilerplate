@@ -421,13 +421,14 @@ function DocumentReview() {
                                     </div>
                                     
                                     {/* Signature Images */}
-                                    {(document.signature_result.signature_blob || document.signature_result.reference_blob) && (
+                                    {(document.signature_result.signature_blob || document.signature_result.reference_signatures?.length > 0 || document.signature_result.reference_blob) && (
                                         <div style={{ marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-lg)', borderTop: '2px solid #e5e7eb' }}>
                                             <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--spacing-lg)', color: '#1f2937', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <span style={{ fontSize: '1.25rem' }}>✍️</span>
                                                 Signature Comparison
                                             </h4>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xl)' }}>
+                                                {/* Questioned Signature */}
                                                 {document.signature_result.signature_blob && (
                                                     <div>
                                                         <div style={{ 
@@ -476,54 +477,105 @@ function DocumentReview() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                {document.signature_result.reference_blob && (
-                                                    <div>
-                                                        <div style={{ 
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: '6px',
-                                                            padding: '6px 14px',
-                                                            background: 'linear-gradient(135deg, #047857 0%, #065f46 100%)',
-                                                            borderRadius: '20px',
-                                                            fontSize: '0.8rem',
-                                                            fontWeight: 700,
-                                                            color: 'white',
-                                                            marginBottom: 'var(--spacing-sm)',
-                                                            boxShadow: '0 2px 6px rgba(4, 120, 87, 0.3)',
-                                                            textShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                                                        }}>
-                                                            <span>✓</span>
-                                                            Reference Signature
+                                                
+                                                {/* Reference Signatures - Support multiple */}
+                                                {(() => {
+                                                    const refSigs = document.signature_result.reference_signatures || [];
+                                                    // Backward compatibility: if no reference_signatures array, use old reference_blob
+                                                    if (refSigs.length === 0 && document.signature_result.reference_blob) {
+                                                        refSigs.push({
+                                                            reference_id: document.signature_result.reference_signature_id || 'reference',
+                                                            blob: document.signature_result.reference_blob,
+                                                            mime_type: document.signature_result.blob_mime_type || 'image/png',
+                                                            customer_id: document.signature_result.reference_signature_id,
+                                                            match_score: document.signature_result.confidence
+                                                        });
+                                                    }
+                                                    
+                                                    if (refSigs.length === 0) return null;
+                                                    
+                                                    return (
+                                                        <div>
+                                                            <div style={{ 
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '6px',
+                                                                padding: '6px 14px',
+                                                                background: 'linear-gradient(135deg, #047857 0%, #065f46 100%)',
+                                                                borderRadius: '20px',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 700,
+                                                                color: 'white',
+                                                                marginBottom: 'var(--spacing-sm)',
+                                                                boxShadow: '0 2px 6px rgba(4, 120, 87, 0.3)',
+                                                                textShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                                                            }}>
+                                                                <span>✓</span>
+                                                                Reference Signature{refSigs.length > 1 ? 's' : ''} {refSigs.length > 1 && `(${refSigs.length})`}
+                                                            </div>
+                                                            <div style={{ 
+                                                                display: 'grid', 
+                                                                gridTemplateColumns: refSigs.length === 1 ? '1fr' : 'repeat(auto-fit, minmax(250px, 1fr))',
+                                                                gap: 'var(--spacing-md)'
+                                                            }}>
+                                                                {refSigs.map((refSig, idx) => (
+                                                                    <div key={idx}>
+                                                                        {refSigs.length > 1 && (
+                                                                            <div style={{
+                                                                                fontSize: '0.75rem',
+                                                                                fontWeight: 600,
+                                                                                color: '#047857',
+                                                                                marginBottom: '4px',
+                                                                                display: 'flex',
+                                                                                justifyContent: 'space-between',
+                                                                                alignItems: 'center'
+                                                                            }}>
+                                                                                <span>{refSig.customer_id || refSig.reference_id}</span>
+                                                                                {refSig.match_score != null && (
+                                                                                    <span style={{
+                                                                                        background: 'rgba(4, 120, 87, 0.1)',
+                                                                                        padding: '2px 8px',
+                                                                                        borderRadius: '12px',
+                                                                                        color: '#065f46'
+                                                                                    }}>
+                                                                                        {(refSig.match_score * 100).toFixed(0)}% match
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        <div style={{ 
+                                                                            border: '3px solid #047857',
+                                                                            borderRadius: '12px',
+                                                                            padding: 'var(--spacing-lg)',
+                                                                            background: 'linear-gradient(to bottom, #ecfdf5, #ffffff)',
+                                                                            display: 'flex',
+                                                                            justifyContent: 'center',
+                                                                            alignItems: 'center',
+                                                                            minHeight: '180px',
+                                                                            boxShadow: '0 4px 12px rgba(4, 120, 87, 0.15)',
+                                                                            transition: 'transform 0.2s, box-shadow 0.2s',
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                        onMouseEnter={(e) => {
+                                                                            e.currentTarget.style.transform = 'translateY(-2px)';
+                                                                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(4, 120, 87, 0.25)';
+                                                                        }}
+                                                                        onMouseLeave={(e) => {
+                                                                            e.currentTarget.style.transform = 'translateY(0)';
+                                                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(4, 120, 87, 0.15)';
+                                                                        }}>
+                                                                            <img 
+                                                                                src={`data:${refSig.mime_type};base64,${refSig.blob}`}
+                                                                                alt={`Reference Signature ${refSig.customer_id || idx + 1}`}
+                                                                                style={{ maxWidth: '100%', maxHeight: '220px', objectFit: 'contain', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         </div>
-                                                        <div style={{ 
-                                                            border: '3px solid #047857',
-                                                            borderRadius: '12px',
-                                                            padding: 'var(--spacing-lg)',
-                                                            background: 'linear-gradient(to bottom, #ecfdf5, #ffffff)',
-                                                            display: 'flex',
-                                                            justifyContent: 'center',
-                                                            alignItems: 'center',
-                                                            minHeight: '180px',
-                                                            boxShadow: '0 4px 12px rgba(4, 120, 87, 0.15)',
-                                                            transition: 'transform 0.2s, box-shadow 0.2s',
-                                                            cursor: 'pointer'
-                                                        }}
-                                                        onMouseEnter={(e) => {
-                                                            e.currentTarget.style.transform = 'translateY(-2px)';
-                                                            e.currentTarget.style.boxShadow = '0 8px 20px rgba(4, 120, 87, 0.25)';
-                                                        }}
-                                                        onMouseLeave={(e) => {
-                                                            e.currentTarget.style.transform = 'translateY(0)';
-                                                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(4, 120, 87, 0.15)';
-                                                        }}>
-                                                            <img 
-                                                                src={`data:${document.signature_result.blob_mime_type || 'image/png'};base64,${document.signature_result.reference_blob}`}
-                                                                alt="Reference Signature"
-                                                                style={{ maxWidth: '100%', maxHeight: '220px', objectFit: 'contain', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     )}

@@ -60,9 +60,26 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
                 if hasattr(prompts_cfg, 'extraction') and hasattr(prompts_cfg.extraction, 'system'):
                     system_prompt = prompts_cfg.extraction.system
                     user_prompt = prompts_cfg.extraction.user
+                    
+                    # Debug: Show that business_config prompts are being used
+                    print(f"\n{'='*80}")
+                    print(f"📝 [EXTRACTION] Using Prompts from business_config.yaml")
+                    print(f"{'='*80}")
+                    print(f"System Prompt (first 150 chars):")
+                    print(f"   {system_prompt[:150]}...")
+                    print(f"\nUser Prompt (first 200 chars):")
+                    print(f"   {user_prompt[:200]}...")
+                    print(f"{'='*80}\n")
+                else:
+                    print(f"\n⚠️  WARNING: extraction prompts not found in business_config.yaml")
+                    print(f"   Using default prompts instead.\n")
+            else:
+                print(f"\n⚠️  WARNING: business.prompts not found in config")
+                print(f"   Using default prompts instead.\n")
             
             # Override with custom_prompt if provided (backward compatibility)
             if custom_prompt:
+                print(f"\n⚠️  Custom prompt override detected - using custom_prompt parameter instead\n")
                 user_prompt = custom_prompt
 
             result = await gemini.extract_payment_fields(
