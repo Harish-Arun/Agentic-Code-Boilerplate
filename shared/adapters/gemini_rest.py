@@ -49,7 +49,7 @@ def get_api_key() -> str:
     
     # TEMPORARY: Simulate token service returning API key for testing
     # TODO: Replace with actual token service implementation before production
-    return "AIzaSyAMM5dkjp8nP142v-YpHDqBem1YtA5-fhM"
+    return None
 
 
 class GeminiRestAdapter:
