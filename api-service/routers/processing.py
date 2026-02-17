@@ -72,25 +72,33 @@ async def process_document_async(
                         "run_signature_verification": run_signature
                     }
                 )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    # DEBUG: Log response from agents
-                    print("\n" + "="*80)
-                    print("📥 API SERVICE - Received from Agents")
-                    print("="*80)
-                    import json
-                    print(json.dumps(result, indent=2, default=str))
-                    print("="*80 + "\n")
-                    
+
+                if response.status_code != 200:
+                    response_text = response.text[:1000]
                     await db.update_document(document_id, {
-                        "status": result.get("status", "EXTRACTED"),
-                        "extracted_data": result.get("extracted_data", {}),
-                        "signature_result": result.get("signature_result", {}),
-                        "thinking_traces": result.get("thinking_traces", [])
+                        "status": "INGESTED",
                     })
-                    return
+                    raise RuntimeError(
+                        f"Agents service returned {response.status_code}: {response_text}"
+                    )
+
+                result = response.json()
+
+                # DEBUG: Log response from agents
+                print("\n" + "="*80)
+                print("📥 API SERVICE - Received from Agents")
+                print("="*80)
+                import json
+                print(json.dumps(result, indent=2, default=str))
+                print("="*80 + "\n")
+
+                await db.update_document(document_id, {
+                    "status": result.get("status", "EXTRACTED"),
+                    "extracted_data": result.get("extracted_data", {}),
+                    "signature_result": result.get("signature_result", {}),
+                    "thinking_traces": result.get("thinking_traces", [])
+                })
+                return
         except httpx.RequestError as conn_err:
             # Agents service not available — fail with clear error
             await db.update_document(document_id, {
@@ -189,8 +197,13 @@ async def get_processing_status(request: Request, document_id: str):
         "INGESTED": 0,
         "PROCESSING": 50,
         "EXTRACTED": 70,
+        "AUTHENTICATED": 90,
         "VERIFIED": 90,
+        "AWAITING_APPROVAL": 95,
+        "REVIEW_PENDING": 95,
         "REVIEWED": 95,
+        "APPROVED": 100,
+        "DISPATCHED": 100,
         "CONFIRMED": 100,
         "REJECTED": 100
     }

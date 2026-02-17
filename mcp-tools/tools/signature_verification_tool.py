@@ -224,7 +224,36 @@ def _parse_metrics_response(raw: dict) -> MetricsResult:
     """Parse Gemini's M1–M7 JSON response into MetricsResult."""
 
     def _safe(d: dict, key: str, default=0.0):
-        return d.get(key, default)
+        value = d.get(key, default)
+        if value is None:
+            return default
+        return value
+
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        if value is None:
+            return default
+        try:
+            if isinstance(value, str):
+                normalized = value.strip().replace(",", "")
+                if normalized == "":
+                    return default
+                return float(normalized)
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _to_int(value: Any, default: int = 0) -> int:
+        if value is None:
+            return default
+        try:
+            if isinstance(value, str):
+                normalized = value.strip().replace(",", "")
+                if normalized == "":
+                    return default
+                return int(float(normalized))
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     m1 = raw.get("M1_global_form", {})
     m2 = raw.get("M2_line_quality", {})
@@ -236,37 +265,37 @@ def _parse_metrics_response(raw: dict) -> MetricsResult:
 
     return MetricsResult(
         m1_global_form=M1GlobalForm(
-            aspect_ratio_reference=float(_safe(m1, "aspect_ratio_reference")),
-            aspect_ratio_questioned=float(_safe(m1, "aspect_ratio_questioned")),
-            aspect_ratio_delta=float(_safe(m1, "aspect_ratio_delta")),
-            score=float(_safe(m1, "score")),
+            aspect_ratio_reference=_to_float(_safe(m1, "aspect_ratio_reference")),
+            aspect_ratio_questioned=_to_float(_safe(m1, "aspect_ratio_questioned")),
+            aspect_ratio_delta=_to_float(_safe(m1, "aspect_ratio_delta")),
+            score=_to_float(_safe(m1, "score")),
             status=str(m1.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m1.get("notes", "")),
         ),
         m2_line_quality=M2LineQuality(
             tremor_detected=bool(m2.get("tremor_detected", False)),
-            hesitation_marks=int(_safe(m2, "hesitation_marks", 0)),
-            quality_score_reference=float(_safe(m2, "quality_score_reference")),
-            quality_score_questioned=float(_safe(m2, "quality_score_questioned")),
-            score=float(_safe(m2, "score")),
+            hesitation_marks=_to_int(_safe(m2, "hesitation_marks", 0)),
+            quality_score_reference=_to_float(_safe(m2, "quality_score_reference")),
+            quality_score_questioned=_to_float(_safe(m2, "quality_score_questioned")),
+            score=_to_float(_safe(m2, "score")),
             status=str(m2.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m2.get("notes", "")),
         ),
         m3_slant_angle=M3SlantAngle(
-            slant_angle_reference=float(_safe(m3, "slant_angle_reference")),
-            slant_angle_questioned=float(_safe(m3, "slant_angle_questioned")),
-            slant_delta_degrees=float(_safe(m3, "slant_delta_degrees")),
-            score=float(_safe(m3, "score")),
+            slant_angle_reference=_to_float(_safe(m3, "slant_angle_reference")),
+            slant_angle_questioned=_to_float(_safe(m3, "slant_angle_questioned")),
+            slant_delta_degrees=_to_float(_safe(m3, "slant_delta_degrees")),
+            score=_to_float(_safe(m3, "score")),
             status=str(m3.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m3.get("notes", "")),
         ),
         m4_baseline_stability=M4BaselineStability(
-            drift_reference=float(_safe(m4, "drift_reference")),
-            drift_questioned=float(_safe(m4, "drift_questioned")),
-            drift_delta=float(_safe(m4, "drift_delta")),
-            slope_variance_reference=float(_safe(m4, "slope_variance_reference")),
-            slope_variance_questioned=float(_safe(m4, "slope_variance_questioned")),
-            score=float(_safe(m4, "score")),
+            drift_reference=_to_float(_safe(m4, "drift_reference")),
+            drift_questioned=_to_float(_safe(m4, "drift_questioned")),
+            drift_delta=_to_float(_safe(m4, "drift_delta")),
+            slope_variance_reference=_to_float(_safe(m4, "slope_variance_reference")),
+            slope_variance_questioned=_to_float(_safe(m4, "slope_variance_questioned")),
+            score=_to_float(_safe(m4, "score")),
             status=str(m4.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m4.get("notes", "")),
         ),
@@ -275,26 +304,26 @@ def _parse_metrics_response(raw: dict) -> MetricsResult:
             markers_reference=m5.get("markers_reference", []) if isinstance(m5.get("markers_reference"), list) else [],
             markers_questioned=m5.get("markers_questioned", []) if isinstance(m5.get("markers_questioned"), list) else [],
             markers_matched=m5.get("markers_matched", []) if isinstance(m5.get("markers_matched"), list) else [],
-            marker_confidence=float(_safe(m5, "marker_confidence")),
-            score=float(_safe(m5, "score")),
+            marker_confidence=_to_float(_safe(m5, "marker_confidence")),
+            score=_to_float(_safe(m5, "score")),
             status=str(m5.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m5.get("notes", "")),
         ),
         m6_spacing_density=M6SpacingDensity(
-            density_reference=float(_safe(m6, "density_reference")),
-            density_questioned=float(_safe(m6, "density_questioned")),
-            density_delta=float(_safe(m6, "density_delta")),
-            score=float(_safe(m6, "score")),
+            density_reference=_to_float(_safe(m6, "density_reference")),
+            density_questioned=_to_float(_safe(m6, "density_questioned")),
+            density_delta=_to_float(_safe(m6, "density_delta")),
+            score=_to_float(_safe(m6, "score")),
             status=str(m6.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m6.get("notes", "")),
         ),
         m7_pressure_inference=M7PressureInference(
-            pressure_mean_reference=float(_safe(m7, "pressure_mean_reference")),
-            pressure_mean_questioned=float(_safe(m7, "pressure_mean_questioned")),
-            pressure_delta=float(_safe(m7, "pressure_delta")),
-            variance_pct_reference=float(_safe(m7, "variance_pct_reference")),
-            variance_pct_questioned=float(_safe(m7, "variance_pct_questioned")),
-            score=float(_safe(m7, "score")),
+            pressure_mean_reference=_to_float(_safe(m7, "pressure_mean_reference")),
+            pressure_mean_questioned=_to_float(_safe(m7, "pressure_mean_questioned")),
+            pressure_delta=_to_float(_safe(m7, "pressure_delta")),
+            variance_pct_reference=_to_float(_safe(m7, "variance_pct_reference")),
+            variance_pct_questioned=_to_float(_safe(m7, "variance_pct_questioned")),
+            score=_to_float(_safe(m7, "score")),
             status=str(m7.get("status", "PENDING")).split("|")[0].strip(),
             notes=str(m7.get("notes", "")),
         ),

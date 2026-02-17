@@ -19,6 +19,11 @@ class DocumentStatus(str, Enum):
     REVIEWED = "REVIEWED"
     CONFIRMED = "CONFIRMED"
     REJECTED = "REJECTED"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    AUTHENTICATED = "AUTHENTICATED"
+    REVIEW_PENDING = "REVIEW_PENDING"
+    APPROVED = "APPROVED"
+    DISPATCHED = "DISPATCHED"
 
 
 # ============================================
@@ -37,6 +42,7 @@ class DocumentUpdate(BaseModel):
     status: Optional[DocumentStatus] = None
     extracted_data: Optional[Dict[str, Any]] = None
     signature_result: Optional[Dict[str, Any]] = None
+    thinking_traces: Optional[List[Dict[str, Any]]] = None
 
 
 class Document(BaseModel):
@@ -48,28 +54,53 @@ class Document(BaseModel):
     raw_file_path: Optional[str] = None
     extracted_data: Dict[str, Any] = Field(default_factory=dict)
     signature_result: Dict[str, Any] = Field(default_factory=dict)
+    thinking_traces: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OperationEntry(BaseModel):
+    """Software operation/audit event entry."""
+    id: str
+    document_id: str
+    operation: str
+    from_status: Optional[str] = None
+    to_status: str
+    changed_at: datetime
+    changed_by: Optional[str] = None
+    reason: Optional[str] = None
 
 
 # ============================================
 # Extraction Models
 # ============================================
+class FieldBoundingBox(BaseModel):
+    """Bounding box coordinates (normalized 0.0-1.0) for extracted fields."""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    page: int = 1
+
+
 class PaymentField(BaseModel):
     """A single extracted field with confidence."""
     value: Any
     confidence: float = Field(ge=0.0, le=1.0)
     source: str = "ai"  # ai, ocr, manual
     location: Optional[str] = None  # Where in document the field was found
+    bounding_box: Optional[FieldBoundingBox] = None
 
 
 class ExtractedPayment(BaseModel):
     """Extracted payment fields from a document."""
     creditor_name: Optional[PaymentField] = None
     creditor_account: Optional[PaymentField] = None
+    creditor_sort_code: Optional[PaymentField] = None
     creditor_bank: Optional[PaymentField] = None
     debtor_name: Optional[PaymentField] = None
     debtor_account: Optional[PaymentField] = None
+    debtor_sort_code: Optional[PaymentField] = None
     debtor_bank: Optional[PaymentField] = None
     amount: Optional[PaymentField] = None
     currency: Optional[PaymentField] = None
@@ -77,7 +108,7 @@ class ExtractedPayment(BaseModel):
     payment_date: Optional[PaymentField] = None
     charges_account: Optional[PaymentField] = None
     reference: Optional[PaymentField] = None
-    raw_ocr_text: Optional[str] = None
+    appendix: Optional[Dict[str, Any]] = None
 
 
 # ============================================

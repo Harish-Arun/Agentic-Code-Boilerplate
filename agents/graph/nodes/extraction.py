@@ -16,7 +16,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "shared"))
 
 from models import (
-    AgentState, ExtractedPayment, PaymentField,
+    AgentState, ExtractedPayment, PaymentField, FieldBoundingBox,
     ExtractionAttempt
 )
 from config import AppConfig
@@ -160,20 +160,37 @@ def _convert_mcp_response(raw: dict) -> ExtractedPayment:
         if not data or (isinstance(data, dict) and data.get("value") is None):
             return None
         if isinstance(data, dict):
+            bbox_data = data.get("bounding_box")
+            bbox = None
+            if isinstance(bbox_data, dict):
+                try:
+                    bbox = FieldBoundingBox(
+                        x1=float(bbox_data.get("x1", 0.0)),
+                        y1=float(bbox_data.get("y1", 0.0)),
+                        x2=float(bbox_data.get("x2", 0.0)),
+                        y2=float(bbox_data.get("y2", 0.0)),
+                        page=int(bbox_data.get("page", 1))
+                    )
+                except Exception:
+                    bbox = None
+
             return PaymentField(
                 value=data.get("value"),
                 confidence=float(data.get("confidence", 0.0)),
                 source="ai",
-                location=data.get("location", "")
+                location=data.get("location", ""),
+                bounding_box=bbox
             )
         return None
 
     return ExtractedPayment(
         creditor_name=make_field(raw.get("creditor_name")),
         creditor_account=make_field(raw.get("creditor_account")),
+        creditor_sort_code=make_field(raw.get("creditor_sort_code")),
         creditor_bank=make_field(raw.get("creditor_bank")),
         debtor_name=make_field(raw.get("debtor_name")),
         debtor_account=make_field(raw.get("debtor_account")),
+        debtor_sort_code=make_field(raw.get("debtor_sort_code")),
         debtor_bank=make_field(raw.get("debtor_bank")),
         amount=make_field(raw.get("amount")),
         currency=make_field(raw.get("currency")),
@@ -181,15 +198,13 @@ def _convert_mcp_response(raw: dict) -> ExtractedPayment:
         payment_date=make_field(raw.get("payment_date")),
         charges_account=make_field(raw.get("charges_account")),
         reference=make_field(raw.get("reference")),
-        raw_ocr_text=raw.get("raw_ocr_text")
+        appendix=raw.get("appendix")
     )
-
-
 def _count_fields(payment: ExtractedPayment) -> int:
     """Count non-null fields in extracted payment."""
     count = 0
-    for field_name in ['creditor_name', 'creditor_account', 'creditor_bank',
-                       'debtor_name', 'debtor_account', 'debtor_bank',
+    for field_name in ['creditor_name', 'creditor_account', 'creditor_sort_code', 'creditor_bank',
+                       'debtor_name', 'debtor_account', 'debtor_sort_code', 'debtor_bank',
                        'amount', 'currency', 'payment_type', 'payment_date',
                        'charges_account', 'reference']:
         if getattr(payment, field_name, None) is not None:

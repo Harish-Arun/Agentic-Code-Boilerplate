@@ -113,6 +113,12 @@ class GeminiRestAdapter:
         
         if not self.api_key:
             raise ValueError("Failed to obtain API key. Check authentication configuration.")
+
+        if not (self.model or "").lower().startswith("gemini"):
+            raise ValueError(
+                "Unsupported model for this adapter. Set GEMINI_MODEL to a Gemini-family model "
+                "(e.g., 'gemini-3-flash-preview')."
+            )
         
         # Log model configuration
         print(f"\n{'='*80}")
@@ -132,6 +138,10 @@ class GeminiRestAdapter:
         print(f"   Level: {self.thinking_level or 'not set'}")
         print(f"   Include Thoughts: {self.include_thoughts}")
         print(f"{'='*80}\n")
+
+    def _supports_thinking_config(self) -> bool:
+        """Thinking config is supported by Gemini families."""
+        return (self.model or "").lower().startswith("gemini")
     
     def _extract_thinking_metadata(self, result: Dict[str, Any]) -> Optional[LLMThinkingMetadata]:
         """Extract thinking metadata from Gemini API response."""
@@ -234,17 +244,18 @@ class GeminiRestAdapter:
         if self.max_tokens:
             generation_config["maxOutputTokens"] = self.max_tokens
         
-        # Add thinking configuration
-        thinking_config = {}
-        if self.thinking_budget is not None:
-            thinking_config["thinkingBudget"] = self.thinking_budget
-        if self.thinking_level:
-            thinking_config["thinkingLevel"] = self.thinking_level
-        if self.include_thoughts:
-            thinking_config["includeThoughts"] = True
-        
-        if thinking_config:
-            generation_config["thinkingConfig"] = thinking_config
+        # Add thinking configuration only for Gemini families that support it
+        if self._supports_thinking_config():
+            thinking_config = {}
+            if self.thinking_budget is not None:
+                thinking_config["thinkingBudget"] = self.thinking_budget
+            if self.thinking_level:
+                thinking_config["thinkingLevel"] = self.thinking_level
+            if self.include_thoughts:
+                thinking_config["includeThoughts"] = True
+
+            if thinking_config:
+                generation_config["thinkingConfig"] = thinking_config
         
         payload = {
             "contents": contents,
@@ -294,15 +305,20 @@ class GeminiRestAdapter:
                     print(f"⏳ Rate limit hit. Retrying in {wait_time:.1f}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    raise
+                    response_text = e.response.text if e.response is not None else ""
+                    raise RuntimeError(
+                        f"Gemini generate failed [{e.response.status_code if e.response else 'unknown'}] "
+                        f"for model '{self.model}': {response_text[:800]}"
+                    ) from e
     
     async def generate_with_vision(
         self,
         prompt: str,
         files: List[Union[str, bytes, tuple[bytes, str]]],
         system_prompt: Optional[str] = None,
+        convert_pdf_to_image: bool = False,
         **kwargs
-    ) -> str:
+    ) -> LLMResponse:
         """
         Generate response with file/image inputs.
         
@@ -310,6 +326,7 @@ class GeminiRestAdapter:
             prompt: Text prompt
             files: List of file paths, bytes, or (bytes, mime_type) tuples
             system_prompt: Optional system instructions
+            convert_pdf_to_image: If True, converts PDFs to 150 DPI PNGs before sending (use for visual tasks like signature detection)
         
         Returns:
             Generated text response
@@ -319,34 +336,60 @@ class GeminiRestAdapter:
         # Build parts with files
         parts = []
         
+        # Helper to process file content
+        def add_file_part(data_b64: str, mime: str):
+            parts.append({
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": data_b64
+                }
+            })
+            
         # Add files first
         for file_input in files:
             if isinstance(file_input, str):
                 # File path
-                data, mime_type = self._encode_file(file_input)
-                parts.append({
-                    "inlineData": {
-                        "mimeType": mime_type,
-                        "data": data
-                    }
-                })
+                if file_input.lower().endswith(".pdf") and convert_pdf_to_image:
+                    # Convert PDF to images for pixel-perfect visual processing (signatures, etc.)
+                    try:
+                        import fitz  # PyMuPDF
+                        doc = fitz.open(file_input)
+                        
+                        # Use 150 DPI for vision input (matches user's successful baseline)
+                        # This balances quality and token/image size for the LLM
+                        TARGET_DPI = 150 
+                        
+                        print(f"📄 converting PDF to {len(doc)} images at {TARGET_DPI} DPI for Vision API...")
+                        
+                        for page in doc:
+                            pix = page.get_pixmap(dpi=TARGET_DPI)
+                            # Convert to PNG bytes
+                            img_data = pix.tobytes("png")
+                            b64_data = base64.standard_b64encode(img_data).decode("utf-8")
+                            add_file_part(b64_data, "image/png")
+                            
+                        doc.close()
+                    except ImportError:
+                        print("⚠️ PyMuPDF (fitz) not installed. Falling back to native PDF upload.")
+                        # Fallback to standard PDF handling
+                        data, mime_type = self._encode_file(file_input)
+                        add_file_part(data, mime_type)
+                    except Exception as e:
+                        print(f"⚠️ PDF to Image conversion failed: {e}. Falling back to native PDF upload.")
+                        # Fallback to standard PDF handling
+                        data, mime_type = self._encode_file(file_input)
+                        add_file_part(data, mime_type)
+                else:
+                    # Standard image file
+                    data, mime_type = self._encode_file(file_input)
+                    add_file_part(data, mime_type)
             elif isinstance(file_input, tuple):
                 # (bytes, mime_type)
                 data, mime_type = file_input
-                parts.append({
-                    "inlineData": {
-                        "mimeType": mime_type,
-                        "data": self._encode_bytes(data, mime_type)
-                    }
-                })
+                add_file_part(self._encode_bytes(data, mime_type), mime_type)
             else:
                 # Raw bytes, assume PNG
-                parts.append({
-                    "inlineData": {
-                        "mimeType": "image/png",
-                        "data": self._encode_bytes(file_input)
-                    }
-                })
+                add_file_part(self._encode_bytes(file_input), "image/png")
         
         # Add text prompt
         parts.append({"text": prompt})
@@ -378,17 +421,18 @@ class GeminiRestAdapter:
         if self.max_tokens:
             generation_config["maxOutputTokens"] = self.max_tokens
         
-        # Add thinking configuration
-        thinking_config = {}
-        if self.thinking_budget is not None:
-            thinking_config["thinkingBudget"] = self.thinking_budget
-        if self.thinking_level:
-            thinking_config["thinkingLevel"] = self.thinking_level
-        if self.include_thoughts:
-            thinking_config["includeThoughts"] = True
-        
-        if thinking_config:
-            generation_config["thinkingConfig"] = thinking_config
+        # Add thinking configuration only for Gemini families that support it
+        if self._supports_thinking_config():
+            thinking_config = {}
+            if self.thinking_budget is not None:
+                thinking_config["thinkingBudget"] = self.thinking_budget
+            if self.thinking_level:
+                thinking_config["thinkingLevel"] = self.thinking_level
+            if self.include_thoughts:
+                thinking_config["includeThoughts"] = True
+
+            if thinking_config:
+                generation_config["thinkingConfig"] = thinking_config
         
         payload = {
             "contents": contents,
@@ -431,7 +475,11 @@ class GeminiRestAdapter:
                     print(f"⏳ Rate limit hit. Retrying in {wait_time:.1f}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    raise
+                    response_text = e.response.text if e.response is not None else ""
+                    raise RuntimeError(
+                        f"Gemini vision generate failed [{e.response.status_code if e.response else 'unknown'}] "
+                        f"for model '{self.model}': {response_text[:1200]}"
+                    ) from e
     
     async def generate_structured(
         self,
@@ -463,7 +511,9 @@ Respond with ONLY the JSON object, nothing else."""
 
         # Call the appropriate generate function
         if files:
-            llm_response = await self.generate_with_vision(structured_prompt, files, system_prompt)
+            # Pass through convert_pdf_to_image from kwargs if provided
+            convert_pdf = kwargs.get('convert_pdf_to_image', False)
+            llm_response = await self.generate_with_vision(structured_prompt, files, system_prompt, convert_pdf_to_image=convert_pdf)
         else:
             llm_response = await self.generate(structured_prompt, system_prompt)
         
@@ -550,6 +600,22 @@ Respond with ONLY the JSON object, nothing else."""
         # Use provided prompts or fallback to basic defaults
         _system_prompt = system_prompt or "You are a payment document extraction specialist. Be precise and accurate."
         _user_prompt = user_prompt or """Extract payment fields from this document with confidence scores."""
+        bbox_instruction = (
+            "\n\nIMPORTANT BOUNDING BOX RULES:\n"
+            "- Return bounding_box coordinates NORMALIZED between 0.0 and 1.0 (not pixels, not points).\n"
+            "- Use top-left origin: x increases to the right, y increases downward.\n"
+            "- Ensure x1 < x2 and y1 < y2.\n"
+            "- Include page as 1-indexed integer."
+        )
+        appendix_instruction = (
+            "\n\nAPPENDIX RULES:\n"
+            "- In appendix.all_fields_dump, extract EVERY key-value pair visible in the document.\n"
+            "- This is a comprehensive metadata dump - include form IDs, reference numbers, dates, codes, messages, stamps, etc.\n"
+            "- Use descriptive keys (e.g., 'form_reference', 'branch_code', 'value_date', 'beneficiary_message').\n"
+            "- Do NOT duplicate core payment fields already extracted above.\n"
+            "- Structure as nested JSON where appropriate (e.g., group related fields)."
+        )
+        _user_prompt = f"{_user_prompt}{bbox_instruction}{appendix_instruction}"
         
         # Debug: Log which prompts are being used
         if system_prompt:
@@ -566,19 +632,31 @@ Respond with ONLY the JSON object, nothing else."""
             print(f"   Using DEFAULT user prompt\n")
 
         schema = {
-            "creditor_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "creditor_account": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "creditor_bank": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "debtor_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "debtor_account": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "debtor_bank": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "amount": {"value": "number or null", "confidence": 0.0, "location": "string"},
-            "currency": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "payment_type": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "payment_date": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "charges_account": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "reference": {"value": "string or null", "confidence": 0.0, "location": "string"},
-            "raw_text": "string - full OCR text of the document"
+            "creditor_name": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "creditor_account": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "creditor_sort_code": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "creditor_bank": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "debtor_name": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "debtor_account": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "debtor_sort_code": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "debtor_bank": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "amount": {"value": "number or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "currency": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "payment_type": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "payment_date": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "charges_account": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "reference": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
+            "appendix": {
+                "notes": "string - brief summary of document type and context",
+                "all_fields_dump": {
+                    "form_reference": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                    "branch_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                    "value_date": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                    "document_number": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                    "beneficiary_message": {"value": "string or null", "confidence": 0.0, "location": "string"}
+                }
+
+            }
         }
         
         result = await self.generate_structured(
@@ -586,6 +664,7 @@ Respond with ONLY the JSON object, nothing else."""
             schema,
             system_prompt=_system_prompt,
             files=[file_path]
+            # Keep PDF as-is for extraction (benefits from text layers & structure)
         )
         
         # Include thinking metadata in response
@@ -656,7 +735,8 @@ Respond with ONLY the JSON object, nothing else."""
             _user_prompt,
             schema,
             system_prompt=_system_prompt,
-            files=[file_path]
+            files=[file_path],
+            convert_pdf_to_image=True  # Convert to 150 DPI PNG for visual signature analysis
         )
         
         # Include thinking metadata in response

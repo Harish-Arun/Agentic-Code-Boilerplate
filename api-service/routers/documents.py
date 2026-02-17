@@ -2,6 +2,7 @@
 Documents Router - CRUD operations for documents.
 """
 from typing import List, Optional
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
@@ -11,10 +12,42 @@ import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
-from models import Document, DocumentCreate, DocumentUpdate, DocumentStatus
+from models import Document, DocumentCreate, DocumentUpdate, DocumentStatus, OperationEntry
 
 
 router = APIRouter()
+
+
+ALLOWED_STATUS_TRANSITIONS = {
+    "INGESTED": {"PROCESSING", "REJECTED"},
+    "PROCESSING": {"INGESTED", "EXTRACTED", "AUTHENTICATED", "VERIFIED", "AWAITING_APPROVAL", "REVIEW_PENDING", "REJECTED"},
+    "EXTRACTED": {"PROCESSING", "AUTHENTICATED", "VERIFIED", "AWAITING_APPROVAL", "REVIEW_PENDING", "REJECTED"},
+    "AUTHENTICATED": {"REVIEW_PENDING", "AWAITING_APPROVAL", "APPROVED", "REJECTED"},
+    "VERIFIED": {"REVIEWED", "REVIEW_PENDING", "AWAITING_APPROVAL", "CONFIRMED", "APPROVED", "REJECTED"},
+    "AWAITING_APPROVAL": {"REVIEW_PENDING", "REVIEWED", "CONFIRMED", "APPROVED", "REJECTED"},
+    "REVIEW_PENDING": {"REVIEWED", "CONFIRMED", "APPROVED", "REJECTED"},
+    "REVIEWED": {"CONFIRMED", "APPROVED", "REJECTED"},
+    "CONFIRMED": {"DISPATCHED"},
+    "APPROVED": {"DISPATCHED"},
+    "REJECTED": set(),
+    "DISPATCHED": set(),
+}
+
+
+def _validate_status_transition(current_status: str, next_status: str) -> None:
+    if current_status == next_status:
+        return
+
+    allowed_next = ALLOWED_STATUS_TRANSITIONS.get(current_status, set())
+    if next_status not in allowed_next:
+        allowed_str = ", ".join(sorted(allowed_next)) if allowed_next else "<terminal>"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid status transition: {current_status} -> {next_status}. "
+                f"Allowed next states: {allowed_str}"
+            )
+        )
 
 
 # ============================================
@@ -22,6 +55,34 @@ router = APIRouter()
 # ============================================
 class DocumentListResponse(BaseModel):
     documents: List[Document]
+    total: int
+    limit: int
+    offset: int
+
+
+class StatusHistoryEntry(BaseModel):
+    document_id: str
+    from_status: Optional[str] = None
+    to_status: str
+    changed_at: datetime
+    changed_by: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class StatusHistoryResponse(BaseModel):
+    document_id: str
+    history: List[StatusHistoryEntry]
+    total: int
+    limit: int
+    offset: int
+
+
+class OperationResponse(BaseModel):
+    operation: Optional[OperationEntry]
+
+
+class OperationListResponse(BaseModel):
+    operations: List[OperationEntry]
     total: int
     limit: int
     offset: int
@@ -46,10 +107,11 @@ async def list_documents(
     """
     db = request.app.state.db
     docs = await db.list_documents(status=status, limit=limit, offset=offset)
+    total = await db.count_documents(status=status)
     
     return DocumentListResponse(
         documents=[Document(**doc) for doc in docs],
-        total=len(docs),  # In production, get actual count
+        total=total,
         limit=limit,
         offset=offset
     )
@@ -170,11 +232,14 @@ async def update_document(
     # Build updates
     updates = {}
     if doc_update.status:
+        _validate_status_transition(existing.get("status", "INGESTED"), doc_update.status.value)
         updates["status"] = doc_update.status.value
     if doc_update.extracted_data:
         updates["extracted_data"] = doc_update.extracted_data
     if doc_update.signature_result:
         updates["signature_result"] = doc_update.signature_result
+    if doc_update.thinking_traces is not None:
+        updates["thinking_traces"] = doc_update.thinking_traces
     
     if updates:
         await db.update_document(document_id, updates)
@@ -204,6 +269,8 @@ async def update_document_status(
     existing = await db.get_document(document_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    _validate_status_transition(existing.get("status", "INGESTED"), status.value)
     
     await db.update_document(document_id, {"status": status.value})
     
@@ -221,3 +288,63 @@ async def delete_document(request: Request, document_id: str):
     
     await db.delete_document(document_id)
     return None
+
+
+@router.get("/{document_id}/status-history", response_model=StatusHistoryResponse)
+async def get_document_status_history(
+    request: Request,
+    document_id: str,
+    limit: int = 100,
+    offset: int = 0
+):
+    """Get status transition history for a document."""
+    db = request.app.state.db
+
+    existing = await db.get_document(document_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    history = await db.get_document_status_history(document_id, limit=limit, offset=offset)
+    total = await db.count_document_status_history(document_id)
+    return StatusHistoryResponse(
+        document_id=document_id,
+        history=[StatusHistoryEntry(**entry) for entry in history],
+        total=total,
+        limit=limit,
+        offset=offset
+    )
+
+
+@router.get("/{document_id}/operation", response_model=OperationResponse)
+async def get_document_operation(request: Request, document_id: str):
+    """Get latest software operation/audit event for a document."""
+    db = request.app.state.db
+
+    existing = await db.get_document(document_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    operation = await db.get_operation(document_id)
+    if not operation:
+        return OperationResponse(operation=None)
+    return OperationResponse(operation=OperationEntry(**operation))
+
+
+@router.get("/operations/list", response_model=OperationListResponse)
+async def list_operations(
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0
+):
+    """List software operation/audit events with optional to-status filter."""
+    db = request.app.state.db
+
+    operations = await db.list_operations(status=status, limit=limit, offset=offset)
+    total = await db.count_operations(status=status)
+    return OperationListResponse(
+        operations=[OperationEntry(**op) for op in operations],
+        total=total,
+        limit=limit,
+        offset=offset
+    )

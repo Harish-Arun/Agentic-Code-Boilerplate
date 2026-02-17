@@ -421,6 +421,67 @@ label {
   animation: pulse 2s infinite;
 }
 
+.pdf-viewer-shell {
+  width: 100%;
+}
+
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.pdf-page-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  min-width: 100px;
+  text-align: center;
+}
+
+.pdf-canvas-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.pdf-canvas-stack {
+  position: relative;
+  max-width: 100%;
+}
+
+.pdf-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: white;
+}
+
+.pdf-overlay {
+  position: absolute;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.pdf-overlay-field {
+  border: 2px solid var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 20%, transparent);
+}
+
+.pdf-overlay-signature {
+  border: 2px solid var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 18%, transparent);
+}
+
+.pdf-error {
+  color: var(--color-error);
+  font-size: 0.85rem;
+  padding: var(--spacing-md);
+}
+
 /* Loading Spinner */
 .spinner {
   width: 24px;

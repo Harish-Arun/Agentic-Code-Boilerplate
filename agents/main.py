@@ -19,7 +19,7 @@ if env_file.exists():
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
 # Add shared module to path
@@ -48,7 +48,7 @@ class ResumeWorkflowRequest(BaseModel):
     """Request to resume a paused workflow."""
     thread_id: str
     approved: bool = True
-    modifications: Dict[str, Any] = {}
+    modifications: Dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowResult(BaseModel):
@@ -57,10 +57,11 @@ class WorkflowResult(BaseModel):
     status: str
     is_paused: bool = False
     current_step: str = ""
-    extracted_data: Dict[str, Any] = {}
-    signature_result: Dict[str, Any] = {}
+    extracted_data: Dict[str, Any] = Field(default_factory=dict)
+    signature_result: Dict[str, Any] = Field(default_factory=dict)
+    thinking_traces: List[Dict[str, Any]] = Field(default_factory=list)
     processing_time_ms: int = 0
-    errors: List[str] = []
+    errors: List[str] = Field(default_factory=list)
 
 
 class WorkflowStateResponse(BaseModel):
@@ -69,7 +70,23 @@ class WorkflowStateResponse(BaseModel):
     exists: bool
     is_paused: bool = False
     current_step: str = ""
-    state: Dict[str, Any] = {}
+    state: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _build_signature_payload(result: AgentState) -> Dict[str, Any]:
+    payload = result.verification_result.model_dump(exclude_none=True) if result.verification_result else {}
+
+    latest_detection_attempt = result.detection_attempts[-1] if result.detection_attempts else None
+    if latest_detection_attempt and latest_detection_attempt.detections:
+        payload["detections"] = [d.model_dump(exclude_none=True) for d in latest_detection_attempt.detections]
+
+    latest_attempt = result.verification_attempts[-1] if result.verification_attempts else None
+    if latest_attempt and latest_attempt.results:
+        payload["all_verifications"] = [v.model_dump(exclude_none=True) for v in latest_attempt.results]
+    elif payload:
+        payload["all_verifications"] = [payload]
+
+    return payload
 
 
 # ============================================
@@ -218,7 +235,7 @@ async def run_agent_workflow(request: RunWorkflowRequest):
             is_paused=is_paused,
             current_step=result.current_step,
             extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
-            signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
+            signature_result=_build_signature_payload(result),
             processing_time_ms=100,
             errors=result.extraction_errors + result.detection_errors + result.verification_errors,
             thinking_traces=thinking_traces
@@ -292,7 +309,7 @@ async def resume_agent_workflow(request: ResumeWorkflowRequest):
             is_paused=False,
             current_step=result.current_step,
             extracted_data=result.extracted_payment.model_dump(exclude_none=True) if result.extracted_payment else {},
-            signature_result=result.verification_result.model_dump(exclude_none=True) if result.verification_result else {},
+            signature_result=_build_signature_payload(result),
             processing_time_ms=100,
             errors=result.extraction_errors + result.detection_errors + result.verification_errors,
             thinking_traces=thinking_traces

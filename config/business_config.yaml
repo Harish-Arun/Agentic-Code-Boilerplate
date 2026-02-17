@@ -81,8 +81,10 @@ extraction_rules:
   required_fields:
     - creditor_name
     - creditor_account
+    - creditor_sort_code
     - debtor_name
     - debtor_account
+    - debtor_sort_code
     - amount
     - currency
 
@@ -141,11 +143,13 @@ prompts:
       1. Creditor/Beneficiary information:
          - creditor_name: Full name and address if available
          - creditor_account: Account number (IBAN or local format)
+        - creditor_sort_code: Sort code (e.g., 12-34-56) when present
          - creditor_bank: Bank name
       
       2. Debtor/Ordering party information:
          - debtor_name: Full name
          - debtor_account: Account number
+        - debtor_sort_code: Sort code (e.g., 12-34-56) when present
          - debtor_bank: Bank name
       
       3. Payment details:
@@ -158,10 +162,27 @@ prompts:
          - charges_account: Account to be charged (if different from debtor)
          - reference: Payment reference or description
       
+      5. Document Metadata Appendix:
+         Extract ALL other key-value pairs visible in the document that are NOT covered by fields 1-4 above.
+         This should be a comprehensive dump of the document content including:
+         - Form identifiers, reference numbers, document numbers
+         - Branch names, branch codes
+         - Dates (value date, processing date, etc.)
+         - Messages or notes to beneficiary
+         - Any other labeled fields or structured data
+         - Stamps, watermarks, or footer text
+         Store these in the appendix.all_fields_dump as a nested JSON structure.
+      
       For each field, provide:
       - value: The extracted value (or null if not found)
       - confidence: Your confidence score (0.0 to 1.0)
       - location: Where you found it in the document (e.g., "Section 3", "top right", etc.)
+      - bounding_box: Normalized coordinates (0.0-1.0) of where the field appears
+          * Use top-left origin: x increases right, y increases downward
+          * Format: {x1: left, y1: top, x2: right, y2: bottom, page: 1}
+          * Ensure x1 < x2 and y1 < y2
+          * Page number is 1-indexed
+          * Coordinates MUST be normalized between 0.0 and 1.0 (NOT pixels, NOT 1000-scale)
       
       IMPORTANT: 
       - Extract numeric values without currency symbols
@@ -193,11 +214,10 @@ prompts:
       
       Return ONLY the box where the person physically signed their signature.
       
-      **Use NORMALIZED coordinates (0.0 to 1.0)**
-      Do NOT use pixel coordinates. Use normalized values:
-      - 0.0 = left/top edge of page
-      - 1.0 = right/bottom edge of page
-      - Example: [0.1, 0.5, 0.4, 0.6] NOT [100, 500, 400, 600]
+      **Use 1000-scale coordinates (0-1000)**
+      Return coordinates on a 0-1000 scale (Gemini native format) or raw pixels if you can determine the document size.
+      - 0 = left/top edge
+      - 1000 = right/bottom edge (if using standard scaling)
       
       **Output for each signature box:**
       {
@@ -209,14 +229,14 @@ prompts:
         "description": "Brief location description"
       }
       
-      Coordinates MUST be normalized 0.0-1.0 (decimals, not pixels).
+      Coordinates can be normalized (0-1), 1000-scale (0-1000), or raw pixels.
       Return empty list if no signed signature boxes found.
     user: |
       Find signature boxes that contain handwritten signatures.
       
       Ignore empty signature boxes. Return ONLY boxes where someone has actually signed - exclude date fields, time fields, or any other adjacent form fields.
       
-      Use normalized coordinates (0.0-1.0). Return empty list if no actual signatures are present.
+      Use 1000-scale coordinates (0-1000) or raw pixels. Return empty list if no actual signatures are present.
       Return empty list if NO ACTUAL SIGNATURES are present (only empty boxes).
 
   # Signature verification prompt with M1-M7 forensic framework

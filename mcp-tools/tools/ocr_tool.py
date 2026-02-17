@@ -96,8 +96,8 @@ Include all visible text, numbers, dates, and labels."""
             }
         
         default_fields = [
-            "creditor_name", "creditor_account", "creditor_bank",
-            "debtor_name", "debtor_account", "debtor_bank",
+            "creditor_name", "creditor_account", "creditor_sort_code", "creditor_bank",
+            "debtor_name", "debtor_account", "debtor_sort_code", "debtor_bank",
             "amount", "currency", "payment_type", "payment_date",
             "reference"
         ]

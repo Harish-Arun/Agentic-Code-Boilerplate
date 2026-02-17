@@ -340,7 +340,7 @@ Agents call MCP, not services directly.
 
 You nailed this already — just formalizing it.
 
-### 1. Transaction DB (Source of Truth)
+### 1. Operations DB (Source of Truth)
 
 * PostgreSQL / Mongo
 * Documents

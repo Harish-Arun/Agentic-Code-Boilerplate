@@ -60,9 +60,11 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
 
             raw_detections = detection_result.get("detections", [])
             model_used = detection_result.get("model_used", "")
+            detection_passes = detection_result.get("detection_passes", 1)
 
             state.add_history("signature_detection", "detections_received", {
-                "count": len(raw_detections)
+                "count": len(raw_detections),
+                "passes": detection_passes
             }, agent="signature_agent")
 
             # Step 2: Crop each detected signature via MCP
@@ -79,10 +81,13 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
                     }
                 doc.close()
                 print(f"📐 Loaded page dimensions from PDF: {len(page_dimensions)} pages")
+                for p, d in page_dimensions.items():
+                    print(f"   Page {p}: {d['width']:.2f} x {d['height']:.2f} points (approx {d['width']/72*25.4:.1f}x{d['height']/72*25.4:.1f} mm)")
             except Exception as e:
                 print(f"⚠️ Warning: Could not read PDF dimensions: {e}")
                 # Fallback to standard dimensions if PDF reading fails
                 page_dimensions = {1: {'width': 612.0, 'height': 792.0}}
+                print(f"   Using fallback dimensions (Letter): 612.0 x 792.0 points")
             
             cropped_detections = []
             for idx, det in enumerate(raw_detections):
@@ -99,19 +104,55 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
                 page_width = page_dims['width']
                 page_height = page_dims['height']
                 
-                # Auto-normalize coordinates if they appear to be in pixels
+                # Auto-normalize coordinates logic
                 x1, y1, x2, y2 = float(bbox.get("x1", 0)), float(bbox.get("y1", 0)), float(bbox.get("x2", 0)), float(bbox.get("y2", 0))
                 
-                # Detect if coordinates are pixels (any value > 1.5 suggests pixels not normalized)
-                if x1 > 1.5 or y1 > 1.5 or x2 > 1.5 or y2 > 1.5:
-                    x1_norm = x1 / page_width
-                    y1_norm = y1 / page_height
-                    x2_norm = x2 / page_width
-                    y2_norm = y2 / page_height
-                    print(f"⚠️ Detected pixel coordinates on page {page_num} (size: {page_width}x{page_height})")
-                    print(f"   Normalizing: ({x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}) → ({x1_norm:.3f}, {y1_norm:.3f}, {x2_norm:.3f}, {y2_norm:.3f})")
-                else:
+                # If coordinates are already normalized (0-1), use as is
+                if x1 <= 1.0 and y1 <= 1.0 and x2 <= 1.0 and y2 <= 1.0:
                     x1_norm, y1_norm, x2_norm, y2_norm = x1, y1, x2, y2
+                else:
+                    # HEURISTIC: Determine if coordinates are 1000-scale (Gemini default) or Pixels (PDF points)
+                    # If any coordinate is > 1000, it MUST be pixels (since 1000-scale max is 1000)
+                    # If page dimensions are small (e.g. < 1000 width/height), pixels are < 1000 too.
+                    # But Gemini almost always outputs 0-1000 integers if not 0-1 floats.
+                    
+                    is_likely_1000_scale = (x1 <= 1000 and y1 <= 1000 and x2 <= 1000 and y2 <= 1000)
+                    
+                    if is_likely_1000_scale:
+                         # Assume 1000-scale (standard for many Vision APIs including Gemini often)
+                         x1_norm = x1 / 1000.0
+                         y1_norm = y1 / 1000.0
+                         x2_norm = x2 / 1000.0
+                         y2_norm = y2 / 1000.0
+                         print(f"⚠️ Detected 1000-scale coordinates. Normalizing by 1000.")
+                    else:
+                         # Must be pixels for a large document
+                         x1_norm = x1 / page_width
+                         y1_norm = y1 / page_height
+                         x2_norm = x2 / page_width
+                         y2_norm = y2 / page_height
+                         print(f"⚠️ Detected large pixel coordinates. Normalizing by page size ({page_width}x{page_height})")
+
+                # Clamp finally
+                x1_norm = max(0.0, min(1.0, x1_norm))
+                y1_norm = max(0.0, min(1.0, y1_norm))
+                x2_norm = max(0.0, min(1.0, x2_norm))
+                y2_norm = max(0.0, min(1.0, y2_norm))
+
+                # Removed heuristic crop padding to ensure "pixel-perfect" match with detection.
+                # If padding is desired, detection logic/prompts should handle it upstream.
+                # box_w = max(0.0, x2_norm - x1_norm)
+                # ... (padding removed)
+
+                # Keep detection bbox aligned with the exact region used for crop,
+                # so PDF highlight and cropped signature represent the same area.
+                det["bounding_box"] = {
+                    "x1": x1_norm,
+                    "y1": y1_norm,
+                    "x2": x2_norm,
+                    "y2": y2_norm,
+                    "page": page_num
+                }
                 
                 # DEBUG: Print bounding box before cropping
                 print(f"\n🔍 Cropping signature {idx}: normalized bbox=[{x1_norm:.3f}, {y1_norm:.3f}, {x2_norm:.3f}, {y2_norm:.3f}] page={page_num}")
@@ -194,6 +235,7 @@ async def signature_detection_node(state: AgentState, config: AppConfig) -> Agen
             state.add_history("signature_detection", "completed", {
                 "attempt": attempt_number,
                 "signatures_found": len(detections),
+                "detection_passes": detection_passes,
                 "processing_time_ms": processing_time
             }, agent="signature_agent")
 

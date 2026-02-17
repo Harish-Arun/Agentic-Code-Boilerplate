@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
+import PdfHighlightViewer from '../components/PdfHighlightViewer'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -24,6 +25,11 @@ function DocumentReview() {
     const [loading, setLoading] = useState(true)
     const [editedFields, setEditedFields] = useState({})
     const [processing, setProcessing] = useState(false)
+    const [statusHistory, setStatusHistory] = useState([])
+    const [operation, setOperation] = useState(null)
+    const [selectedVerificationIndex, setSelectedVerificationIndex] = useState(0)
+    const [activeField, setActiveField] = useState(null)
+    const [appendixExpanded, setAppendixExpanded] = useState(false)
 
     useEffect(() => {
         fetchDocument()
@@ -32,11 +38,23 @@ function DocumentReview() {
     const fetchDocument = async () => {
         setLoading(true)
         try {
-            const doc = await api.getDocument(id)
+            const [doc, historyResponse, operationResponse] = await Promise.all([
+                api.getDocument(id),
+                api.getDocumentStatusHistory(id).catch(() => ({ history: [] })),
+                api.getDocumentOperation(id).catch(() => ({ operation: null }))
+            ])
             setDocument(doc)
+            setStatusHistory(historyResponse.history || [])
+            setOperation(operationResponse.operation || null)
+            setSelectedVerificationIndex(0)
+            setActiveField(null)
         } catch (err) {
             console.warn('API unavailable, showing empty document state')
             setDocument({ ...EMPTY_DOCUMENT, id })
+            setStatusHistory([])
+            setOperation(null)
+            setSelectedVerificationIndex(0)
+            setActiveField(null)
         }
         setLoading(false)
     }
@@ -99,13 +117,15 @@ function DocumentReview() {
         
         // Handle both old format (score only) and new format (full object)
         const score = typeof metricData === 'object' ? (metricData.score || 0) : metricData
-        const scorePercent = (score / 5) * 100
+        const usesLegacyScale = score <= 5
+        const scorePercent = usesLegacyScale ? (score / 5) * 100 : score
+        const scoreLabel = usesLegacyScale ? `${score}/5` : `${score.toFixed(1)}/100`
         const status = metricData.status || ''
         const notes = metricData.notes || ''
         const execution = metricData.execution || ''
         
-        const scoreColor = score >= 4 ? 'var(--color-success)' : 
-                          score >= 3 ? 'var(--color-warning)' : 
+        const scoreColor = scorePercent >= 80 ? 'var(--color-success)' : 
+                          scorePercent >= 60 ? 'var(--color-warning)' : 
                           'var(--color-error)'
         
         return (
@@ -137,7 +157,7 @@ function DocumentReview() {
                         borderRadius: 'var(--radius-sm)',
                         fontSize: '0.75rem'
                     }}>
-                        {score}/5 ({scorePercent.toFixed(0)}%)
+                        {scoreLabel} ({scorePercent.toFixed(0)}%)
                     </span>
                 </summary>
                 {(status || notes) && (
@@ -185,6 +205,25 @@ function DocumentReview() {
             </div>
         )
     }
+
+    const signatureResults = Array.isArray(document?.signature_result?.all_verifications)
+        ? document.signature_result.all_verifications
+        : (document?.signature_result && Object.keys(document.signature_result).length > 0 ? [document.signature_result] : [])
+
+    const signatureDetections = Array.isArray(document?.signature_result?.detections)
+        ? document.signature_result.detections
+        : []
+
+    const extractedFieldEntries = Object.entries(document.extracted_data || {}).filter(([key, data]) => (
+        key !== 'appendix' && data && typeof data === 'object' && 'value' in data && 'confidence' in data
+    ))
+    
+    const appendixData = document?.extracted_data?.appendix || null
+
+    const activeSignatureResult = signatureResults[selectedVerificationIndex] || signatureResults[0] || null
+    const activeSignatureDetection = signatureDetections[selectedVerificationIndex] || signatureDetections[0] || null
+    const fileName = document?.raw_file_path?.split('/').pop()
+    const documentUrl = fileName ? `${API_BASE_URL}/static/uploads/${fileName}` : ''
 
     return (
         <div className="animate-fadeIn">
@@ -244,7 +283,7 @@ function DocumentReview() {
 
             {/* Split View */}
             <div className="split-view">
-                {/* Left Panel - PDF Viewer (Placeholder) */}
+                {/* Left Panel - PDF Viewer */}
                 <div className="split-panel">
                     <div className="panel-header">
                         Document Preview
@@ -252,24 +291,18 @@ function DocumentReview() {
                     <div className="panel-content" style={{
                         display: 'flex',
                         flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: '500px',
+                        minHeight: '560px',
                         background: 'var(--color-bg-tertiary)'
                     }}>
-                        <iframe
-                            src={`${API_BASE_URL}/static/uploads/${document.raw_file_path.split('/').pop()}`}
-                            style={{
-                                width: '100%',
-                                height: '600px',
-                                border: 'none',
-                                borderRadius: 'var(--radius-md)'
-                            }}
-                            title="Document Preview"
+                        <PdfHighlightViewer
+                            fileUrl={documentUrl}
+                            activeField={activeField}
+                            activeSignature={activeSignatureDetection}
+                            focusPage={activeField?.data?.bounding_box?.page || activeSignatureDetection?.bounding_box?.page || 1}
                         />
                         <div style={{ marginTop: 'var(--spacing-md)', textAlign: 'center' }}>
                             <a
-                                href={`${API_BASE_URL}/static/uploads/${document.raw_file_path.split('/').pop()}`}
+                                href={documentUrl}
                                 target="_blank"
                                 rel="noreferrer"
                                 style={{ fontSize: '0.875rem', color: 'var(--color-primary)' }}
@@ -288,8 +321,17 @@ function DocumentReview() {
                     <div className="panel-content">
                         {/* Extracted Fields Form */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-                            {Object.entries(document.extracted_data || {}).map(([field, data]) => (
-                                <div key={field}>
+                            {extractedFieldEntries.map(([field, data]) => (
+                                <div
+                                    key={field}
+                                    onClick={() => setActiveField({ field, data })}
+                                    style={{
+                                        border: activeField?.field === field ? '1px solid var(--color-primary)' : '1px solid transparent',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: 'var(--spacing-sm)',
+                                        cursor: 'pointer'
+                                    }}
+                                >
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-xs)' }}>
                                         <label style={{ textTransform: 'capitalize' }}>
                                             {field.replace(/_/g, ' ')}
@@ -313,6 +355,7 @@ function DocumentReview() {
                                         type="text"
                                         value={editedFields[field] ?? data.value}
                                         onChange={(e) => handleFieldChange(field, e.target.value)}
+                                        onFocus={() => setActiveField({ field, data })}
                                     />
                                     <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--spacing-xs)' }}>
                                         Source: {data.source === 'ai' ? '🤖 AI Extracted' : '✏️ Manual Edit'}
@@ -321,8 +364,104 @@ function DocumentReview() {
                             ))}
                         </div>
 
+                        {/* Appendix - All Extracted Fields Dump */}
+                        {appendixData && (
+                            <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                                <div 
+                                    onClick={() => setAppendixExpanded(!appendixExpanded)}
+                                    style={{ 
+                                        display: 'flex', 
+                                        justifyContent: 'space-between', 
+                                        alignItems: 'center',
+                                        cursor: 'pointer',
+                                        marginBottom: appendixExpanded ? 'var(--spacing-md)' : '0'
+                                    }}
+                                >
+                                    <h3>📋 Document Metadata Dump</h3>
+                                    <span style={{ fontSize: '1.5rem', transition: 'transform 0.2s', transform: appendixExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                                        ▼
+                                    </span>
+                                </div>
+                                
+                                {appendixExpanded && (
+                                    <div className="card" style={{ background: 'rgba(249, 250, 251, 1)', marginTop: 'var(--spacing-sm)' }}>
+                                        {appendixData.notes && (
+                                            <div style={{ 
+                                                padding: 'var(--spacing-sm)', 
+                                                background: 'rgba(255, 255, 255, 0.6)', 
+                                                borderRadius: 'var(--radius-sm)',
+                                                marginBottom: 'var(--spacing-md)',
+                                                fontSize: '0.875rem',
+                                                color: 'var(--color-text-secondary)',
+                                                fontStyle: 'italic'
+                                            }}>
+                                                {appendixData.notes}
+                                            </div>
+                                        )}
+                                        
+                                        <pre style={{ 
+                                            background: '#1e293b',
+                                            color: '#e2e8f0',
+                                            padding: 'var(--spacing-md)',
+                                            borderRadius: 'var(--radius-md)',
+                                            fontSize: '0.75rem',
+                                            overflow: 'auto',
+                                            maxHeight: '400px',
+                                            fontFamily: 'monospace',
+                                            lineHeight: '1.5'
+                                        }}>
+                                            {JSON.stringify(appendixData.all_fields_dump || appendixData.key_values || {}, null, 2)}
+                                        </pre>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Operation Snapshot */}
+                        {operation && (
+                            <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                                <h3 style={{ marginBottom: 'var(--spacing-md)' }}>Software Operation Snapshot</h3>
+                                <div className="card" style={{ background: 'rgba(255,255,255,0.6)' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)', fontSize: '0.875rem' }}>
+                                        <div><strong>Operation:</strong> {operation.operation || 'STATUS_TRANSITION'}</div>
+                                        <div><strong>From:</strong> {operation.from_status || 'START'}</div>
+                                        <div><strong>To:</strong> {operation.to_status || 'N/A'}</div>
+                                        <div><strong>Changed By:</strong> {operation.changed_by || 'system'}</div>
+                                        <div style={{ gridColumn: '1 / -1' }}><strong>Reason:</strong> {operation.reason || 'N/A'}</div>
+                                        <div style={{ gridColumn: '1 / -1' }}><strong>Timestamp:</strong> {operation.changed_at ? new Date(operation.changed_at).toLocaleString() : 'N/A'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Status Timeline */}
+                        {statusHistory.length > 0 && (
+                            <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+                                <h3 style={{ marginBottom: 'var(--spacing-md)' }}>Status Timeline</h3>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                                    {statusHistory.map((entry, index) => (
+                                        <div key={`${entry.changed_at}-${index}`} className="card" style={{ padding: 'var(--spacing-sm)' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                                                    {(entry.from_status || 'START')} → {entry.to_status}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                                                    {new Date(entry.changed_at).toLocaleString()}
+                                                </div>
+                                            </div>
+                                            {entry.reason && (
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                                                    Reason: {entry.reason}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Signature Verification Result */}
-                        {document.signature_result && (
+                        {activeSignatureResult && (
                             <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '2px solid #e5e7eb' }}>
                                 <h3 style={{ 
                                     marginBottom: 'var(--spacing-lg)',
@@ -336,18 +475,47 @@ function DocumentReview() {
                                     <span style={{ fontSize: '1.5rem' }}>🔐</span>
                                     Signature Verification
                                 </h3>
+
+                                {signatureResults.length > 1 && (
+                                    <div className="card" style={{ marginBottom: 'var(--spacing-md)' }}>
+                                        <div style={{ fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>
+                                            Detected Verifications: {signatureResults.length}
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                            {signatureResults.map((entry, idx) => (
+                                                <div key={idx} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    gap: 'var(--spacing-sm)',
+                                                    padding: '6px 10px',
+                                                    borderRadius: '8px',
+                                                    background: idx === selectedVerificationIndex ? 'rgba(37, 99, 235, 0.12)' : 'rgba(0,0,0,0.04)',
+                                                    border: idx === selectedVerificationIndex ? '1px solid rgba(37, 99, 235, 0.5)' : '1px solid transparent',
+                                                    fontSize: '0.82rem',
+                                                    cursor: 'pointer'
+                                                }} onClick={() => {
+                                                    setSelectedVerificationIndex(idx)
+                                                    setActiveField(null)
+                                                }}>
+                                                    <span><strong>Signature {idx + 1}:</strong> {entry.recommendation || 'N/A'}</span>
+                                                    <span>Confidence {(Number(entry.confidence || 0) * 100).toFixed(0)}%</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="card" style={{
-                                    background: document.signature_result.match
+                                    background: activeSignatureResult.match
                                         ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)'
                                         : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                                    border: `3px solid ${document.signature_result.match ? '#10b981' : '#ef4444'}`,
+                                    border: `3px solid ${activeSignatureResult.match ? '#10b981' : '#ef4444'}`,
                                     borderRadius: '12px',
-                                    boxShadow: document.signature_result.match
+                                    boxShadow: activeSignatureResult.match
                                         ? '0 4px 12px rgba(16, 185, 129, 0.2)'
                                         : '0 4px 12px rgba(239, 68, 68, 0.2)'
                                 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-md)' }}>
-                                        {document.signature_result.match ? (
+                                        {activeSignatureResult.match ? (
                                             <div style={{ 
                                                 width: '48px', 
                                                 height: '48px', 
@@ -383,15 +551,15 @@ function DocumentReview() {
                                             <div style={{
                                                 fontSize: '1.125rem',
                                                 fontWeight: 700,
-                                                color: document.signature_result.match ? '#065f46' : '#991b1b',
+                                                color: activeSignatureResult.match ? '#065f46' : '#991b1b',
                                                 marginBottom: '4px'
                                             }}>
-                                                {document.signature_result.match ? 'Signature Match' : 'Signature Mismatch'}
+                                                {activeSignatureResult.match ? 'Signature Match' : 'Signature Mismatch'}
                                             </div>
                                             <div style={{ 
                                                 fontSize: '0.875rem', 
                                                 fontWeight: 600,
-                                                color: document.signature_result.match ? '#047857' : '#dc2626',
+                                                color: activeSignatureResult.match ? '#047857' : '#dc2626',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 gap: '6px'
@@ -403,7 +571,7 @@ function DocumentReview() {
                                                     background: 'rgba(255,255,255,0.5)',
                                                     borderRadius: '6px'
                                                 }}>
-                                                    {(document.signature_result.confidence * 100).toFixed(0)}%
+                                                    {(Number(activeSignatureResult.confidence || 0) * 100).toFixed(0)}%
                                                 </span>
                                             </div>
                                         </div>
@@ -417,11 +585,11 @@ function DocumentReview() {
                                         lineHeight: '1.6',
                                         marginBottom: 'var(--spacing-md)'
                                     }}>
-                                        <strong style={{ color: '#1f2937' }}>Analysis:</strong> {document.signature_result.reasoning}
+                                        <strong style={{ color: '#1f2937' }}>Analysis:</strong> {activeSignatureResult.reasoning}
                                     </div>
                                     
                                     {/* Signature Images */}
-                                    {(document.signature_result.signature_blob || document.signature_result.reference_signatures?.length > 0 || document.signature_result.reference_blob) && (
+                                    {(activeSignatureResult.signature_blob || activeSignatureResult.reference_signatures?.length > 0 || activeSignatureResult.reference_blob) && (
                                         <div style={{ marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-lg)', borderTop: '2px solid #e5e7eb' }}>
                                             <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 'var(--spacing-lg)', color: '#1f2937', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <span style={{ fontSize: '1.25rem' }}>✍️</span>
@@ -429,7 +597,7 @@ function DocumentReview() {
                                             </h4>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xl)' }}>
                                                 {/* Questioned Signature */}
-                                                {document.signature_result.signature_blob && (
+                                                {activeSignatureResult.signature_blob && (
                                                     <div>
                                                         <div style={{ 
                                                             display: 'inline-flex',
@@ -470,7 +638,7 @@ function DocumentReview() {
                                                             e.currentTarget.style.boxShadow = '0 4px 12px rgba(91, 33, 182, 0.15)';
                                                         }}>
                                                             <img 
-                                                                src={`data:${document.signature_result.blob_mime_type || 'image/png'};base64,${document.signature_result.signature_blob}`}
+                                                                src={`data:${activeSignatureResult.blob_mime_type || 'image/png'};base64,${activeSignatureResult.signature_blob}`}
                                                                 alt="Questioned Signature"
                                                                 style={{ maxWidth: '100%', maxHeight: '220px', objectFit: 'contain', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}
                                                             />
@@ -480,15 +648,15 @@ function DocumentReview() {
                                                 
                                                 {/* Reference Signatures - Support multiple */}
                                                 {(() => {
-                                                    const refSigs = document.signature_result.reference_signatures || [];
+                                                    const refSigs = activeSignatureResult.reference_signatures || [];
                                                     // Backward compatibility: if no reference_signatures array, use old reference_blob
-                                                    if (refSigs.length === 0 && document.signature_result.reference_blob) {
+                                                    if (refSigs.length === 0 && activeSignatureResult.reference_blob) {
                                                         refSigs.push({
-                                                            reference_id: document.signature_result.reference_signature_id || 'reference',
-                                                            blob: document.signature_result.reference_blob,
-                                                            mime_type: document.signature_result.blob_mime_type || 'image/png',
-                                                            customer_id: document.signature_result.reference_signature_id,
-                                                            match_score: document.signature_result.confidence
+                                                            reference_id: activeSignatureResult.reference_signature_id || 'reference',
+                                                            blob: activeSignatureResult.reference_blob,
+                                                            mime_type: activeSignatureResult.blob_mime_type || 'image/png',
+                                                            customer_id: activeSignatureResult.reference_signature_id,
+                                                            match_score: activeSignatureResult.confidence
                                                         });
                                                     }
                                                     
@@ -581,93 +749,93 @@ function DocumentReview() {
                                     )}
                                     
                                     {/* M1-M7 Metrics Breakdown */}
-                                    {document.signature_result.metrics && (
+                                    {activeSignatureResult.metrics && (
                                         <div style={{ marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-md)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
                                             <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 'var(--spacing-md)', color: 'var(--color-text)' }}>
                                                 📊 M1-M7 Metrics Analysis
                                             </h4>
                                             <div style={{ display: 'grid', gap: 'var(--spacing-sm)' }}>
-                                                {renderMetric('M1', 'Global Form', document.signature_result.metrics.m1_global_form)}
-                                                {renderMetric('M2', 'Line Quality', document.signature_result.metrics.m2_line_quality)}
-                                                {renderMetric('M3', 'Slant Angle', document.signature_result.metrics.m3_slant_angle)}
-                                                {renderMetric('M4', 'Baseline Stability', document.signature_result.metrics.m4_baseline_stability)}
-                                                {renderMetric('M5', 'Terminal Strokes', document.signature_result.metrics.m5_terminal_strokes)}
-                                                {renderMetric('M6', 'Spacing Density', document.signature_result.metrics.m6_spacing_density)}
-                                                {renderMetric('M7', 'Pressure Inference', document.signature_result.metrics.m7_pressure_inference)}
+                                                {renderMetric('M1', 'Global Form', activeSignatureResult.metrics.m1_global_form)}
+                                                {renderMetric('M2', 'Line Quality', activeSignatureResult.metrics.m2_line_quality)}
+                                                {renderMetric('M3', 'Slant Angle', activeSignatureResult.metrics.m3_slant_angle)}
+                                                {renderMetric('M4', 'Baseline Stability', activeSignatureResult.metrics.m4_baseline_stability)}
+                                                {renderMetric('M5', 'Terminal Strokes', activeSignatureResult.metrics.m5_terminal_strokes)}
+                                                {renderMetric('M6', 'Spacing Density', activeSignatureResult.metrics.m6_spacing_density)}
+                                                {renderMetric('M7', 'Pressure Inference', activeSignatureResult.metrics.m7_pressure_inference)}
                                             </div>
                                             
                                             {/* Scoring Details */}
-                                            {document.signature_result.scoring_details && (
+                                            {activeSignatureResult.scoring_details && (
                                                 <div style={{ marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-md)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
                                                     <h4 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: 'var(--spacing-md)', color: '#1f2937' }}>
-                                                        📈 FIV {document.signature_result.scoring_details.fiv_version} Scoring Details
+                                                        📈 FIV {activeSignatureResult.scoring_details.fiv_version} Scoring Details
                                                     </h4>
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)', fontSize: '0.875rem' }}>
                                                         <div style={{ padding: 'var(--spacing-sm)', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid #e5e7eb' }}>
                                                             <strong style={{ color: '#1f2937' }}>Vetoed:</strong> 
                                                             <span style={{ 
                                                                 marginLeft: 'var(--spacing-xs)', 
-                                                                color: document.signature_result.scoring_details.vetoed ? '#dc2626' : '#059669',
+                                                                color: activeSignatureResult.scoring_details.vetoed ? '#dc2626' : '#059669',
                                                                 fontWeight: 600
                                                             }}>
-                                                                {document.signature_result.scoring_details.vetoed ? 'Yes' : 'No'}
+                                                                {activeSignatureResult.scoring_details.vetoed ? 'Yes' : 'No'}
                                                             </span>
-                                                            {document.signature_result.scoring_details.veto_metric && (
+                                                            {activeSignatureResult.scoring_details.veto_metric && (
                                                                 <span style={{ marginLeft: 'var(--spacing-xs)', color: '#6b7280' }}>
-                                                                    ({document.signature_result.scoring_details.veto_metric})
+                                                                    ({activeSignatureResult.scoring_details.veto_metric})
                                                                 </span>
                                                             )}
                                                         </div>
                                                         <div style={{ padding: 'var(--spacing-sm)', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid #e5e7eb' }}>
                                                             <strong style={{ color: '#1f2937' }}>Base Score:</strong> 
                                                             <span style={{ marginLeft: 'var(--spacing-xs)', color: '#1f2937', fontWeight: 600 }}>
-                                                                {document.signature_result.scoring_details.base_score != null ? document.signature_result.scoring_details.base_score.toFixed(1) : 'N/A'}
+                                                                {activeSignatureResult.scoring_details.base_score != null ? activeSignatureResult.scoring_details.base_score.toFixed(1) : 'N/A'}
                                                             </span>
                                                         </div>
                                                         <div style={{ padding: 'var(--spacing-sm)', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid #e5e7eb' }}>
                                                             <strong style={{ color: '#1f2937' }}>Penalties:</strong> 
                                                             <span style={{ marginLeft: 'var(--spacing-xs)', color: '#dc2626', fontWeight: 600 }}>
-                                                                -{document.signature_result.scoring_details.penalties_applied != null ? document.signature_result.scoring_details.penalties_applied.toFixed(1) : '0.0'}
+                                                                -{activeSignatureResult.scoring_details.penalties_applied != null ? activeSignatureResult.scoring_details.penalties_applied.toFixed(1) : '0.0'}
                                                             </span>
                                                         </div>
                                                         <div style={{ padding: 'var(--spacing-sm)', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid #e5e7eb' }}>
                                                             <strong style={{ color: '#1f2937' }}>Final Score:</strong> 
                                                             <span style={{ marginLeft: 'var(--spacing-xs)', fontWeight: 700, color: '#2563eb', fontSize: '1rem' }}>
-                                                                {document.signature_result.scoring_details.final_score != null ? document.signature_result.scoring_details.final_score.toFixed(1) : '0.0'}
+                                                                {activeSignatureResult.scoring_details.final_score != null ? activeSignatureResult.scoring_details.final_score.toFixed(1) : '0.0'}
                                                             </span>
                                                         </div>
                                                         <div style={{ padding: 'var(--spacing-sm)', background: '#ffffff', borderRadius: 'var(--radius-sm)', border: '1px solid #e5e7eb', gridColumn: '1 / -1' }}>
                                                             <strong style={{ color: '#1f2937' }}>Decision:</strong> 
                                                             <span style={{ marginLeft: 'var(--spacing-xs)', fontWeight: 700, color: '#1f2937', fontSize: '0.95rem' }}>
-                                                                {document.signature_result.scoring_details.decision || 'UNKNOWN'} 
+                                                                {activeSignatureResult.scoring_details.decision || 'UNKNOWN'} 
                                                             </span>
                                                             <span style={{ 
                                                                 marginLeft: 'var(--spacing-xs)',
                                                                 padding: '3px 8px',
                                                                 borderRadius: 'var(--radius-sm)',
-                                                                background: document.signature_result.scoring_details.confidence_band === 'HIGH' ? '#059669' :
-                                                                           document.signature_result.scoring_details.confidence_band === 'MEDIUM' ? '#d97706' : '#dc2626',
+                                                                background: activeSignatureResult.scoring_details.confidence_band === 'HIGH' ? '#059669' :
+                                                                           activeSignatureResult.scoring_details.confidence_band === 'MEDIUM' ? '#d97706' : '#dc2626',
                                                                 color: 'white',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 700
                                                             }}>
-                                                                {document.signature_result.scoring_details.confidence_band}
+                                                                {activeSignatureResult.scoring_details.confidence_band}
                                                             </span>
                                                         </div>
-                                                        {document.signature_result.scoring_details.veto_reason && (
+                                                        {activeSignatureResult.scoring_details.veto_reason && (
                                                             <div style={{ padding: 'var(--spacing-sm)', background: '#fee2e2', borderRadius: 'var(--radius-sm)', gridColumn: '1 / -1', border: '1px solid #fecaca' }}>
                                                                 <strong style={{ color: '#991b1b' }}>Veto Reason:</strong><br/>
                                                                 <span style={{ color: '#1f2937' }}>
-                                                                    {document.signature_result.scoring_details.veto_reason}
+                                                                    {activeSignatureResult.scoring_details.veto_reason}
                                                                 </span>
                                                             </div>
                                                         )}
-                                                        {document.signature_result.scoring_details.llm_model && (
+                                                        {activeSignatureResult.scoring_details.llm_model && (
                                                             <div style={{ padding: 'var(--spacing-sm)', background: 'rgba(255,255,255,0.5)', borderRadius: 'var(--radius-sm)', gridColumn: '1 / -1', fontSize: '0.7rem' }}>
-                                                                <strong>Analysis Model:</strong> {document.signature_result.scoring_details.llm_model}
-                                                                {document.signature_result.scoring_details.processing_time_ms > 0 && (
+                                                                <strong>Analysis Model:</strong> {activeSignatureResult.scoring_details.llm_model}
+                                                                {activeSignatureResult.scoring_details.processing_time_ms > 0 && (
                                                                     <span style={{ marginLeft: 'var(--spacing-md)', color: 'var(--color-text-muted)' }}>
-                                                                        Time: {document.signature_result.scoring_details.processing_time_ms}ms
+                                                                        Time: {activeSignatureResult.scoring_details.processing_time_ms}ms
                                                                     </span>
                                                                 )}
                                                             </div>

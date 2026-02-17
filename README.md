@@ -174,6 +174,9 @@ npm run dev
 - `GET /documents/{id}` - Get document
 - `PATCH /documents/{id}` - Update document
 - `DELETE /documents/{id}` - Delete document
+- `GET /documents/{id}/status-history` - Get document status timeline
+- `GET /documents/{id}/operation` - Get latest software operation event
+- `GET /documents/operations/list` - List software operation events
 
 ### Processing
 - `POST /process/document` - Start processing

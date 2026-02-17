@@ -103,7 +103,9 @@ def create_checkpointer(config: AppConfig) -> Optional[BaseCheckpointSaver]:
     elif backend == "postgres":
         # Production: Use PostgreSQL for persistent checkpoints
         try:
-            from langgraph.checkpoint.postgres import PostgresSaver
+            from importlib import import_module
+            postgres_module = import_module("langgraph.checkpoint.postgres")
+            PostgresSaver = getattr(postgres_module, "PostgresSaver")
             conn_string = os.environ.get(
                 "CHECKPOINT_POSTGRES_CONN", 
                 "postgresql://postgres:postgres@localhost:5432/nnp_ai"

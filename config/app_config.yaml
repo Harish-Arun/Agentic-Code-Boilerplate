@@ -31,7 +31,7 @@ database:
   type: "sqlite"  # Options: sqlite, postgres, mongo, dynamodb
 
   sqlite:
-    path: "${DATA_DIR:-./data}/nnp_ai.db"
+    path: "${DATA_DIR:-./data}/mmp_ai.db"
 
   postgres:
     host: "${POSTGRES_HOST:-localhost}"

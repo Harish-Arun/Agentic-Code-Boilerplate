@@ -117,8 +117,13 @@ function DocumentList() {
             'INGESTED': 'badge-ingested',
             'PROCESSING': 'badge-processing',
             'EXTRACTED': 'badge-extracted',
+            'AUTHENTICATED': 'badge-verified',
             'VERIFIED': 'badge-verified',
+            'AWAITING_APPROVAL': 'badge-processing',
+            'REVIEW_PENDING': 'badge-verified',
             'CONFIRMED': 'badge-confirmed',
+            'APPROVED': 'badge-confirmed',
+            'DISPATCHED': 'badge-confirmed',
             'REJECTED': 'badge-rejected',
             'REVIEWED': 'badge-verified'
         }
@@ -159,8 +164,10 @@ function DocumentList() {
                         <option value="INGESTED">Ingested</option>
                         <option value="PROCESSING">Processing</option>
                         <option value="EXTRACTED">Extracted</option>
+                        <option value="AWAITING_APPROVAL">Awaiting Approval</option>
                         <option value="VERIFIED">Verified</option>
                         <option value="CONFIRMED">Confirmed</option>
+                        <option value="APPROVED">Approved</option>
                         <option value="REJECTED">Rejected</option>
                     </select>
                     <button
@@ -188,8 +195,8 @@ function DocumentList() {
                 {[
                     { label: 'Total', value: documents.length, color: 'var(--color-text)' },
                     { label: 'Processing', value: documents.filter(d => d.status === 'PROCESSING').length, color: 'var(--color-warning)' },
-                    { label: 'Pending Review', value: documents.filter(d => ['EXTRACTED', 'VERIFIED'].includes(d.status)).length, color: 'var(--color-primary)' },
-                    { label: 'Completed', value: documents.filter(d => d.status === 'CONFIRMED').length, color: 'var(--color-success)' }
+                    { label: 'Pending Review', value: documents.filter(d => ['EXTRACTED', 'VERIFIED', 'AWAITING_APPROVAL', 'REVIEW_PENDING'].includes(d.status)).length, color: 'var(--color-primary)' },
+                    { label: 'Completed', value: documents.filter(d => ['CONFIRMED', 'APPROVED', 'DISPATCHED'].includes(d.status)).length, color: 'var(--color-success)' }
                 ].map((stat, i) => (
                     <div key={i} className="card" style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: '2rem', fontWeight: '700', color: stat.color }}>{stat.value}</div>

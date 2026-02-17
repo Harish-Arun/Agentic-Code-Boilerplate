@@ -19,6 +19,59 @@ from config import AppConfig
 from adapters import get_gemini_adapter
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str) and value.strip() == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _validate_normalized_field_bboxes(extracted_payment: Dict[str, Any]) -> Dict[str, Any]:
+    validated = dict(extracted_payment)
+
+    for field_name, field_data in validated.items():
+        if not isinstance(field_data, dict):
+            continue
+
+        bbox = field_data.get("bounding_box")
+        if not isinstance(bbox, dict):
+            continue
+
+        page = int(bbox.get("page", 1) or 1)
+        if page <= 0:
+            page = 1
+
+        x1 = _safe_float(bbox.get("x1", 0.0), 0.0)
+        y1 = _safe_float(bbox.get("y1", 0.0), 0.0)
+        x2 = _safe_float(bbox.get("x2", 0.0), 0.0)
+        y2 = _safe_float(bbox.get("y2", 0.0), 0.0)
+
+        is_normalized = (0.0 <= x1 <= 1.0 and 0.0 <= y1 <= 1.0 and 0.0 <= x2 <= 1.0 and 0.0 <= y2 <= 1.0)
+        has_valid_order = (x1 < x2 and y1 < y2)
+
+        if not is_normalized or not has_valid_order:
+            print(
+                f"⚠️ [EXTRACTION] Invalid/non-normalized bbox for {field_name} on page {page}: "
+                f"({x1}, {y1}, {x2}, {y2}) — dropping bbox"
+            )
+            field_data["bounding_box"] = None
+            continue
+
+        field_data["bounding_box"] = {
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+            "page": page
+        }
+
+    return validated
+
+
 def register_extraction_tools(mcp: FastMCP, config: AppConfig):
     """Register extraction business-logic tools with the MCP server."""
 
@@ -38,7 +91,7 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
             custom_prompt: Optional custom extraction prompt (uses business config default)
 
         Returns:
-            Extracted payment fields with confidence scores and raw OCR text
+            Extracted payment fields with confidence scores and appendix metadata
         """
         if not os.path.exists(document_path):
             return {
@@ -88,15 +141,38 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
                 user_prompt=user_prompt
             )
 
-            raw_text = result.get("raw_text", "")
             thinking_metadata = result.get("_thinking", {})
+
+            known_result_keys = {
+                "creditor_name", "creditor_account", "creditor_sort_code", "creditor_bank",
+                "debtor_name", "debtor_account", "debtor_sort_code", "debtor_bank",
+                "amount", "currency", "payment_type", "payment_date",
+                "charges_account", "reference", "appendix", "_thinking"
+            }
+
+            appendix = result.get("appendix") if isinstance(result.get("appendix"), dict) else {}
+            appendix_notes = appendix.get("notes")
+            appendix_kv = appendix.get("key_values") if isinstance(appendix.get("key_values"), dict) else {}
+
+            for key, value in result.items():
+                if key in known_result_keys:
+                    continue
+                if key in {"raw_text", "raw_ocr_text"}:
+                    continue
+                if value is None:
+                    continue
+                if isinstance(value, dict) and {"value", "confidence"}.issubset(set(value.keys())):
+                    continue
+                appendix_kv[key] = value
 
             extracted_payment = {
                 "creditor_name": result.get("creditor_name"),
                 "creditor_account": result.get("creditor_account"),
+                "creditor_sort_code": result.get("creditor_sort_code"),
                 "creditor_bank": result.get("creditor_bank"),
                 "debtor_name": result.get("debtor_name"),
                 "debtor_account": result.get("debtor_account"),
+                "debtor_sort_code": result.get("debtor_sort_code"),
                 "debtor_bank": result.get("debtor_bank"),
                 "amount": result.get("amount"),
                 "currency": result.get("currency"),
@@ -104,8 +180,13 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
                 "payment_date": result.get("payment_date"),
                 "charges_account": result.get("charges_account"),
                 "reference": result.get("reference"),
-                "raw_ocr_text": raw_text
+                "appendix": {
+                    "notes": appendix_notes,
+                    "key_values": appendix_kv
+                }
             }
+
+            extracted_payment = _validate_normalized_field_bboxes(extracted_payment)
 
             return {
                 "success": True,
@@ -161,7 +242,7 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
             iban_min = biz_rules.iban_min_length
             iban_max = biz_rules.iban_max_length
         except Exception:
-            required = ['creditor_name', 'debtor_name', 'amount', 'currency']
+            required = ['creditor_name', 'creditor_sort_code', 'debtor_name', 'debtor_sort_code', 'amount', 'currency']
             min_confidence = 0.70
             iban_min = 15
             iban_max = 34

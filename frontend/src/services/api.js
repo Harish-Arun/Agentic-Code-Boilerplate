@@ -134,6 +134,22 @@ class ApiService {
         })
     }
 
+    async getDocumentStatusHistory(documentId, limit = 100, offset = 0) {
+        return this.request(`/documents/${documentId}/status-history?limit=${limit}&offset=${offset}`)
+    }
+
+    async getDocumentOperation(documentId) {
+        return this.request(`/documents/${documentId}/operation`)
+    }
+
+    async listOperations(status = null, limit = 100, offset = 0) {
+        let url = `/documents/operations/list?limit=${limit}&offset=${offset}`
+        if (status) {
+            url += `&status=${status}`
+        }
+        return this.request(url)
+    }
+
     // ============================================
     // Health Check
     // ============================================

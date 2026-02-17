@@ -257,8 +257,8 @@ class DecisionThresholdsConfig(BaseModel):
 # ============================================
 class ExtractionRulesConfig(BaseModel):
     required_fields: List[str] = Field(default_factory=lambda: [
-        "creditor_name", "creditor_account", "debtor_name",
-        "debtor_account", "amount", "currency"
+        "creditor_name", "creditor_account", "creditor_sort_code", "debtor_name",
+        "debtor_account", "debtor_sort_code", "amount", "currency"
     ])
     minimum_confidence: float = 0.70
     account_format: str = "IBAN"

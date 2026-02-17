@@ -137,6 +137,15 @@ curl http://localhost:8002/health
 - View Document List
 - Click on a document to see Review screen
 
+### Operations View
+- Open the Operations page from the left navigation (`/operations`)
+- Review software operation events (status transitions, actor, reason, timestamp)
+- Filter operation events by target status
+- Validate API parity with:
+  - `GET /documents/{id}/status-history`
+  - `GET /documents/{id}/operation`
+  - `GET /documents/operations/list`
+
 ---
 
 ## Key Design Decisions

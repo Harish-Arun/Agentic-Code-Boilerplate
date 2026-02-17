@@ -73,9 +73,9 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
                 # Use customer name from extracted data or fallback to signer name
                 customer_id = None
                 if state.extracted_payment and state.extracted_payment.debtor_name:
-                    # Extract string value from field object
                     debtor_field = state.extracted_payment.debtor_name
-                    customer_id = debtor_field.get('value') if isinstance(debtor_field, dict) else str(debtor_field)
+                    if hasattr(debtor_field, "value") and debtor_field.value:
+                        customer_id = str(debtor_field.value)
                 
                 customer_id = customer_id or detection.signer_name or "default_customer"
                 
@@ -162,10 +162,37 @@ async def verification_node(state: AgentState, config: AppConfig) -> AgentState:
                     }, agent="verification_agent")
                 else:
                     error_msg = verify_result.get("error", "unknown")
+                    traceback_msg = verify_result.get("traceback")
                     print(f"❌ Verification failed for signature {idx}: {error_msg}")
+                    if traceback_msg:
+                        print(f"🧵 MCP traceback (truncated): {traceback_msg[:300]}")
+
+                    fallback_verification = SignatureVerification(
+                        match=False,
+                        confidence=0.0,
+                        reasoning=f"Verification tool failed for signature {idx}: {error_msg}",
+                        reference_signature_id=customer_id or f"ref_{idx}",
+                        risk_indicators=[f"tool_error:{error_msg}"],
+                        recommendation="MANUAL_REVIEW",
+                        signature_blob=detection.image_blob,
+                        reference_blob=reference_blob,
+                        blob_mime_type=detection.blob_mime_type or "image/png",
+                        reference_signatures=[
+                            ReferenceSignature(
+                                reference_id=customer_id or f"ref_{idx}",
+                                blob=reference_blob,
+                                mime_type=reference_mime or "image/png",
+                                customer_id=customer_id,
+                                match_score=0.0
+                            )
+                        ] if reference_blob else []
+                    )
+                    verifications.append(fallback_verification)
+
                     state.add_history("verification", "verification_failed", {
                         "index": idx,
-                        "error": error_msg
+                        "error": error_msg,
+                        "fallback": "MANUAL_REVIEW"
                     }, agent="verification_agent")
 
             processing_time = int((time.time() - start_time) * 1000)
@@ -265,6 +292,14 @@ def _convert_verification(
     customer_id: str = None
 ) -> SignatureVerification:
     """Convert MCP verify_signature response to SignatureVerification model."""
+    def _safe_float(value, default: float = 0.0) -> float:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
     # The MCP tool returns a 'verification' dict that already matches the model
     verification_data = result.get("verification", {})
     metrics_score = result.get("metrics_score", {})
@@ -306,13 +341,13 @@ def _convert_verification(
             blob=reference_blob,
             mime_type=reference_mime or "image/png",
             customer_id=customer_id,
-            match_score=float(verification_data.get("confidence", 0.0))
+            match_score=_safe_float(verification_data.get("confidence", 0.0))
         )
         reference_signatures.append(ref_sig)
     
     sig_verification = SignatureVerification(
         match=verification_data.get("match", False),
-        confidence=float(verification_data.get("confidence", 0.0)),
+        confidence=_safe_float(verification_data.get("confidence", 0.0)),
         reasoning=verification_data.get("reasoning", ""),
         reference_signature_id=customer_id or f"ref_{idx}",
         similarity_factors=SimilarityFactors(**verification_data.get("similarity_factors", {})) if verification_data.get("similarity_factors") else None,

@@ -20,6 +20,63 @@ from config import AppConfig
 from adapters import get_gemini_adapter
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str) and value.strip() == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_bbox(raw_bbox: Any) -> Dict[str, float]:
+    """
+    Parse bounding box coordinates.
+    Does NOT clamp to 0-1 range to allow pixel coordinates to pass through
+    to the consumer (which has page dimension context for proper normalization).
+    """
+    if isinstance(raw_bbox, dict):
+        x1 = _safe_float(raw_bbox.get("x1", 0.0))
+        y1 = _safe_float(raw_bbox.get("y1", 0.0))
+        x2 = _safe_float(raw_bbox.get("x2", 0.0))
+        y2 = _safe_float(raw_bbox.get("y2", 0.0))
+    elif isinstance(raw_bbox, list) and len(raw_bbox) >= 4:
+        x1 = _safe_float(raw_bbox[0], 0.0)
+        y1 = _safe_float(raw_bbox[1], 0.0)
+        x2 = _safe_float(raw_bbox[2], 0.0)
+        y2 = _safe_float(raw_bbox[3], 0.0)
+    else:
+        x1, y1, x2, y2 = 0.0, 0.0, 0.0, 0.0
+
+    # Ensure correct ordering
+    if x2 < x1:
+        x1, x2 = x2, x1
+    if y2 < y1:
+        y1, y2 = y2, y1
+
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+
+def _iou(a: Dict[str, float], b: Dict[str, float]) -> float:
+    inter_x1 = max(a["x1"], b["x1"])
+    inter_y1 = max(a["y1"], b["y1"])
+    inter_x2 = min(a["x2"], b["x2"])
+    inter_y2 = min(a["y2"], b["y2"])
+
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+
+    area_a = max(0.0, (a["x2"] - a["x1"])) * max(0.0, (a["y2"] - a["y1"]))
+    area_b = max(0.0, (b["x2"] - b["x1"])) * max(0.0, (b["y2"] - b["y1"]))
+    denom = area_a + area_b - inter_area
+    if denom <= 0:
+        return 0.0
+    return inter_area / denom
+
+
 def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
     """Register signature detection business-logic tools with the MCP server."""
 
@@ -83,6 +140,29 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
                 print(f"\n⚠️  Custom prompt override detected - using custom_prompt parameter instead\n")
                 user_prompt = custom_prompt
 
+            def parse_detections(raw_result: Dict[str, Any]) -> list:
+                parsed = []
+                for sig in raw_result.get("signatures", []):
+                    bbox_norm = _normalize_bbox(sig.get("bounding_box", [0, 0, 0, 0]))
+                    width = bbox_norm["x2"] - bbox_norm["x1"]
+                    height = bbox_norm["y2"] - bbox_norm["y1"]
+                    if width <= 0.001 or height <= 0.001:
+                        continue
+
+                    parsed.append({
+                        "bounding_box": {
+                            "x1": bbox_norm["x1"],
+                            "y1": bbox_norm["y1"],
+                            "x2": bbox_norm["x2"],
+                            "y2": bbox_norm["y2"],
+                            "page": int(sig.get("page_number", 1))
+                        },
+                        "signature_type": sig.get("signature_type", "unknown"),
+                        "confidence": _safe_float(sig.get("confidence", 0.0), 0.0),
+                        "description": sig.get("description", "")
+                    })
+                return parsed
+
             result = await gemini.detect_signatures(
                 document_path,
                 system_prompt=system_prompt,
@@ -91,29 +171,50 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
 
             # Extract thinking metadata
             thinking_metadata = result.get("_thinking", {})
+            detections = parse_detections(result)
 
-            # Convert Gemini response to structured detections
-            detections = []
-            for sig in result.get("signatures", []):
-                bbox = sig.get("bounding_box", [0, 0, 0, 0])
-                detections.append({
-                    "bounding_box": {
-                        "x1": float(bbox[0]),
-                        "y1": float(bbox[1]),
-                        "x2": float(bbox[2]),
-                        "y2": float(bbox[3]),
-                        "page": int(sig.get("page_number", 1))
-                    },
-                    "signature_type": sig.get("signature_type", "unknown"),
-                    "confidence": float(sig.get("confidence", 0.0)),
-                    "description": sig.get("description", "")
-                })
+            # High-recall second pass when only one signature is found
+            passes = 1
+            if len(detections) <= 1:
+                recall_prompt = (user_prompt or "Detect signatures in this document") + (
+                    "\n\nHigh-recall mode: detect EVERY handwritten signature, initials mark,"
+                    " and signed stamp-like region. Return all plausible boxes even if confidence is moderate."
+                )
+                second_result = await gemini.detect_signatures(
+                    document_path,
+                    system_prompt=system_prompt,
+                    user_prompt=recall_prompt
+                )
+                second_detections = parse_detections(second_result)
+                passes = 2
+
+                merged = list(detections)
+                for candidate in second_detections:
+                    candidate_bbox = candidate["bounding_box"]
+                    candidate_page = candidate_bbox.get("page", 1)
+
+                    duplicate = False
+                    for existing in merged:
+                        existing_bbox = existing["bounding_box"]
+                        if existing_bbox.get("page", 1) != candidate_page:
+                            continue
+                        if _iou(existing_bbox, candidate_bbox) >= 0.6:
+                            duplicate = True
+                            if candidate.get("confidence", 0.0) > existing.get("confidence", 0.0):
+                                existing.update(candidate)
+                            break
+
+                    if not duplicate:
+                        merged.append(candidate)
+
+                detections = merged
 
             return {
                 "success": True,
                 "detections": detections,
                 "model_used": gemini.model,
                 "total_found": len(detections),
+                "detection_passes": passes,
                 "thinking": thinking_metadata
             }
 
@@ -177,6 +278,8 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
             page_rect = page_obj.rect
             page_width = page_rect.width
             page_height = page_rect.height
+            
+            print(f"📄 PDF Page {page} Dimensions: {page_width:.2f} x {page_height:.2f} points (1 pt = 1/72 inch)")
 
             # Convert normalized coordinates to actual coordinates
             x1 = bbox_x1 * page_width
@@ -184,8 +287,26 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
             x2 = bbox_x2 * page_width
             y2 = bbox_y2 * page_height
 
+            # Load page to get dimensions
+            # Note: For images opened as PDF, PyMuPDF sets resolution to 72 DPI by default
+            # so 1 pixel = 1 point.
+            # page.rect.width/height are in points.
+            
+            # If the user wants "pixel to pixel" mapping and consistent DPI:
+            # We should try to respect the original image DPI if possible, or at least
+            # ensure we aren't artificially upscaling if not needed.
+            # However, for signature verification, higher resolution (300 DPI) is usually better.
+            
+            # Use 150 DPI to match the vision model input resolution
+            # ensuring pixel-to-pixel consistency vs the detection logic
+            TARGET_DPI = 150
+            
             crop_rect = fitz.Rect(x1, y1, x2, y2)
-            pix = page_obj.get_pixmap(clip=crop_rect, dpi=300)
+            pix = page_obj.get_pixmap(clip=crop_rect, dpi=TARGET_DPI)
+            
+            # Log the crop action for debugging
+            print(f"✂️ Cropping at {TARGET_DPI} DPI. Rect: [{x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}]")
+            
             pix.save(output_path)
 
             # Get raw bytes for blob transport (simulates ISV blob response)
@@ -242,6 +363,7 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
             detections = json.loads(detections_json) if isinstance(detections_json, str) else detections_json
         except (json.JSONDecodeError, TypeError):
             return {
+                "success": False,
                 "valid": False,
                 "issues": ["Invalid input: could not parse detections"],
                 "feedback": "Validation failed"
@@ -272,6 +394,7 @@ def register_signature_detection_tools(mcp: FastMCP, config: AppConfig):
                 issues.append(f"Signature {idx+1} crop file not found: {crop_path}")
 
         return {
+            "success": True,
             "valid": len(issues) == 0,
             "issues": issues,
             "feedback": f"Validated {len(detections)} signatures with {len(issues)} issues"
