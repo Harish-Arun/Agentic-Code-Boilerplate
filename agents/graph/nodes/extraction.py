@@ -64,6 +64,9 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
 
             if not extraction_result.get("success"):
                 error_msg = extraction_result.get("error", "Extraction failed")
+                print(f"\n❌ EXTRACTION FAILED")
+                print(f"Error: {error_msg}")
+                print(f"Full extraction result: {json.dumps(extraction_result, indent=2)}\n")
                 raise RuntimeError(error_msg)
 
             # Convert response to ExtractedPayment model
@@ -196,17 +199,20 @@ def _convert_mcp_response(raw: dict) -> ExtractedPayment:
         currency=make_field(raw.get("currency")),
         payment_type=make_field(raw.get("payment_type")),
         payment_date=make_field(raw.get("payment_date")),
-        charges_account=make_field(raw.get("charges_account")),
-        reference=make_field(raw.get("reference")),
-        appendix=raw.get("appendix")
+        additional_fields=raw.get("additional_fields")
     )
+
+
 def _count_fields(payment: ExtractedPayment) -> int:
     """Count non-null fields in extracted payment."""
     count = 0
     for field_name in ['creditor_name', 'creditor_account', 'creditor_sort_code', 'creditor_bank',
                        'debtor_name', 'debtor_account', 'debtor_sort_code', 'debtor_bank',
-                       'amount', 'currency', 'payment_type', 'payment_date',
-                       'charges_account', 'reference']:
+                       'amount', 'currency', 'payment_type', 'payment_date']:
         if getattr(payment, field_name, None) is not None:
             count += 1
+    # Count additional fields if present
+    if payment.additional_fields:
+        count += len(payment.additional_fields)
+        count += 1
     return count

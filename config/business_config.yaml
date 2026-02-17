@@ -140,15 +140,39 @@ prompts:
       
       CRITICAL - BOUNDING BOX REQUIREMENTS:
       For EVERY field you extract, you MUST provide accurate bounding_box coordinates.
-      - Coordinates must be NORMALIZED (0.0 to 1.0 range) - NOT pixels, NOT 1000-scale
-      - Origin is TOP-LEFT: x increases rightward, y increases downward
+      
+      COORDINATE SYSTEM FUNDAMENTALS:
+      - Coordinates must be NORMALIZED (0.0 to 1.0 range) - NOT pixels, NOT 1000-scale, NOT points
+      - Origin is TOP-LEFT corner of the page: (0.0, 0.0) is top-left, (1.0, 1.0) is bottom-right
+      - X-axis: increases from left (0.0) to right (1.0)
+      - Y-axis: increases from top (0.0) to bottom (1.0)
       - Format: {x1: left_edge, y1: top_edge, x2: right_edge, y2: bottom_edge, page: page_number}
+      
+      CALCULATION PROCESS (THINK STEP-BY-STEP):
+      1. Identify the text value on the page
+      2. Measure its horizontal position: How far from left? (0% = left edge, 100% = right edge)
+      3. Measure its vertical position: How far from top? (0% = top edge, 100% = bottom edge)
+      4. Convert percentages to decimals: 35% = 0.35, 50% = 0.50, 78% = 0.78
+      5. x1 = left edge of text value (normalized 0.0-1.0)
+      6. y1 = top edge of text value (normalized 0.0-1.0)
+      7. x2 = right edge of text value (normalized 0.0-1.0)
+      8. y2 = bottom edge of text value (normalized 0.0-1.0)
+      9. VERIFY: x1 < x2 and y1 < y2 (otherwise box is invalid)
+      
+      IMPORTANT RULES:
       - ALWAYS ensure x1 < x2 and y1 < y2
-      - x1, y1 is the top-left corner of the text/field
-      - x2, y2 is the bottom-right corner of the text/field
+      - Draw tight bounding boxes around the actual VALUE text (not the label)
       - Page numbers are 1-indexed (first page = 1)
       - NEVER use placeholder coordinates like (0.0, 0.0, 0.0, 0.0) unless the field is truly not found
-      - Draw tight bounding boxes around the actual VALUE text (not the label)
+      - If a value spans multiple lines, the box should encompass ALL lines
+      
+      CONCRETE EXAMPLE:
+      If you see "£1,234.56" positioned roughly:
+      - 40% from the left edge of the page
+      - 55% from the top edge of the page
+      - Text extends to 65% from left (width of text)
+      - Text extends to 58% from top (height of text)
+      Then: {x1: 0.40, y1: 0.55, x2: 0.65, y2: 0.58, page: 1}
     user: |
       Extract the following payment fields from the provided document:
       

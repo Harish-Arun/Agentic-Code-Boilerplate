@@ -143,27 +143,40 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
 
             thinking_metadata = result.get("_thinking", {})
 
+            # Handle new schema with additional_fields (catch-all like **kwargs)
             known_result_keys = {
                 "creditor_name", "creditor_account", "creditor_sort_code", "creditor_bank",
                 "debtor_name", "debtor_account", "debtor_sort_code", "debtor_bank",
                 "amount", "currency", "payment_type", "payment_date",
-                "charges_account", "reference", "appendix", "_thinking"
+                "additional_fields", "_thinking"
             }
 
-            appendix = result.get("appendix") if isinstance(result.get("appendix"), dict) else {}
-            appendix_notes = appendix.get("notes")
-            appendix_kv = appendix.get("key_values") if isinstance(appendix.get("key_values"), dict) else {}
+            # Extract additional fields (the catch-all dict)
+            additional_fields = result.get("additional_fields")
+            if not isinstance(additional_fields, dict):
+                additional_fields = {}
 
+            # Legacy fallback: if old 'appendix' structure exists, merge it
+            if "appendix" in result and isinstance(result["appendix"], dict):
+                appendix = result["appendix"]
+                if "all_fields_dump" in appendix:
+                    additional_fields.update(appendix["all_fields_dump"])
+                if "key_values" in appendix:
+                    additional_fields.update(appendix["key_values"])
+
+            # Capture any other unexpected top-level fields
             for key, value in result.items():
                 if key in known_result_keys:
                     continue
-                if key in {"raw_text", "raw_ocr_text"}:
+                if key in {"raw_text", "raw_ocr_text", "appendix"}:
                     continue
                 if value is None:
                     continue
                 if isinstance(value, dict) and {"value", "confidence"}.issubset(set(value.keys())):
+                    # This is a field object, add to additional_fields if not already there
+                    if key not in additional_fields:
+                        additional_fields[key] = value
                     continue
-                appendix_kv[key] = value
 
             extracted_payment = {
                 "creditor_name": result.get("creditor_name"),
@@ -178,12 +191,7 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
                 "currency": result.get("currency"),
                 "payment_type": result.get("payment_type"),
                 "payment_date": result.get("payment_date"),
-                "charges_account": result.get("charges_account"),
-                "reference": result.get("reference"),
-                "appendix": {
-                    "notes": appendix_notes,
-                    "key_values": appendix_kv
-                }
+                "additional_fields": additional_fields
             }
 
             extracted_payment = _validate_normalized_field_bboxes(extracted_payment)

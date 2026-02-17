@@ -106,9 +106,7 @@ class ExtractedPayment(BaseModel):
     currency: Optional[PaymentField] = None
     payment_type: Optional[PaymentField] = None
     payment_date: Optional[PaymentField] = None
-    charges_account: Optional[PaymentField] = None
-    reference: Optional[PaymentField] = None
-    appendix: Optional[Dict[str, Any]] = None
+    additional_fields: Optional[Dict[str, Any]] = None  # Catch-all for all other fields (like **kwargs)
 
 
 # ============================================
