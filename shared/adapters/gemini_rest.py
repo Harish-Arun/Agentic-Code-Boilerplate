@@ -598,24 +598,9 @@ Respond with ONLY the JSON object, nothing else."""
             Extracted payment fields with confidence scores
         """
         # Use provided prompts or fallback to basic defaults
+        # All prompt content should be in business_config.yaml for business control
         _system_prompt = system_prompt or "You are a payment document extraction specialist. Be precise and accurate."
         _user_prompt = user_prompt or """Extract payment fields from this document with confidence scores."""
-        bbox_instruction = (
-            "\n\nIMPORTANT BOUNDING BOX RULES:\n"
-            "- Return bounding_box coordinates NORMALIZED between 0.0 and 1.0 (not pixels, not points).\n"
-            "- Use top-left origin: x increases to the right, y increases downward.\n"
-            "- Ensure x1 < x2 and y1 < y2.\n"
-            "- Include page as 1-indexed integer."
-        )
-        appendix_instruction = (
-            "\n\nAPPENDIX RULES:\n"
-            "- In appendix.all_fields_dump, extract EVERY key-value pair visible in the document.\n"
-            "- This is a comprehensive metadata dump - include form IDs, reference numbers, dates, codes, messages, stamps, etc.\n"
-            "- Use descriptive keys (e.g., 'form_reference', 'branch_code', 'value_date', 'beneficiary_message').\n"
-            "- Do NOT duplicate core payment fields already extracted above.\n"
-            "- Structure as nested JSON where appropriate (e.g., group related fields)."
-        )
-        _user_prompt = f"{_user_prompt}{bbox_instruction}{appendix_instruction}"
         
         # Debug: Log which prompts are being used
         if system_prompt:
@@ -644,18 +629,14 @@ Respond with ONLY the JSON object, nothing else."""
             "currency": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
             "payment_type": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
             "payment_date": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
-            "charges_account": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
-            "reference": {"value": "string or null", "confidence": 0.0, "location": "string", "bounding_box": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0, "page": 1}},
-            "appendix": {
-                "notes": "string - brief summary of document type and context",
-                "all_fields_dump": {
-                    "form_reference": {"value": "string or null", "confidence": 0.0, "location": "string"},
-                    "branch_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
-                    "value_date": {"value": "string or null", "confidence": 0.0, "location": "string"},
-                    "document_number": {"value": "string or null", "confidence": 0.0, "location": "string"},
-                    "beneficiary_message": {"value": "string or null", "confidence": 0.0, "location": "string"}
-                }
-
+            "additional_fields": {
+                "form_reference": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "branch_name": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "value_date": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "reference": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "charges_account": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "beneficiary_message": {"value": "string or null", "confidence": 0.0, "location": "string"},
+                "..._add_more_fields_as_seen": {"value": "string or null", "confidence": 0.0, "location": "string"}
             }
         }
         

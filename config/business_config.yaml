@@ -137,6 +137,18 @@ prompts:
   extraction:
     system: |
       You are a payment document processing assistant. Your task is to extract payment-related information from documents.
+      
+      CRITICAL - BOUNDING BOX REQUIREMENTS:
+      For EVERY field you extract, you MUST provide accurate bounding_box coordinates.
+      - Coordinates must be NORMALIZED (0.0 to 1.0 range) - NOT pixels, NOT 1000-scale
+      - Origin is TOP-LEFT: x increases rightward, y increases downward
+      - Format: {x1: left_edge, y1: top_edge, x2: right_edge, y2: bottom_edge, page: page_number}
+      - ALWAYS ensure x1 < x2 and y1 < y2
+      - x1, y1 is the top-left corner of the text/field
+      - x2, y2 is the bottom-right corner of the text/field
+      - Page numbers are 1-indexed (first page = 1)
+      - NEVER use placeholder coordinates like (0.0, 0.0, 0.0, 0.0) unless the field is truly not found
+      - Draw tight bounding boxes around the actual VALUE text (not the label)
     user: |
       Extract the following payment fields from the provided document:
       
@@ -158,31 +170,45 @@ prompts:
          - payment_type: Type of payment (CHAPS, BACS, SWIFT, Wire Transfer, etc.)
          - payment_date: Date of payment (DD/MM/YYYY format if possible)
       
-      4. Additional information:
-         - charges_account: Account to be charged (if different from debtor)
-         - reference: Payment reference or description
-      
-      5. Document Metadata Appendix:
-         Extract ALL other key-value pairs visible in the document that are NOT covered by fields 1-4 above.
-         This should be a comprehensive dump of the document content including:
-         - Form identifiers, reference numbers, document numbers
+      4. Additional Fields (Catch-All):
+         Extract ALL other key-value pairs visible in the document that are NOT covered by sections 1-3.
+         Think of this like Python's **kwargs - a catch-all for EVERYTHING else you see.
+         Include:
+         - Form identifiers, reference numbers, document numbers  
          - Branch names, branch codes
          - Dates (value date, processing date, etc.)
-         - Messages or notes to beneficiary
+         - Messages, references, or notes to beneficiary
+         - Charges account information
          - Any other labeled fields or structured data
          - Stamps, watermarks, or footer text
-         Store these in the appendix.all_fields_dump as a nested JSON structure.
+         Store these in the additional_fields object with descriptive keys.
       
-      For each field, provide:
+      For each field in sections 1-3, provide:
       - value: The extracted value (or null if not found)
       - confidence: Your confidence score (0.0 to 1.0)
       - location: Where you found it in the document (e.g., "Section 3", "top right", etc.)
-      - bounding_box: Normalized coordinates (0.0-1.0) of where the field appears
-          * Use top-left origin: x increases right, y increases downward
-          * Format: {x1: left, y1: top, x2: right, y2: bottom, page: 1}
-          * Ensure x1 < x2 and y1 < y2
-          * Page number is 1-indexed
-          * Coordinates MUST be normalized between 0.0 and 1.0 (NOT pixels, NOT 1000-scale)
+      - bounding_box: REQUIRED - Normalized coordinates (0.0-1.0) as {x1, y1, x2, y2, page}
+      
+      For each field in additional_fields (section 4), provide:
+      - value: The extracted value
+      - confidence: Your confidence score (0.0 to 1.0)
+      - location: Where you found it
+      
+      CRITICAL BOUNDING BOX RULES:
+      1. EVERY field in sections 1-3 MUST have accurate bounding_box coordinates
+      2. Coordinates must be normalized (0.0-1.0), NOT pixels or 1000-scale
+      3. Draw boxes around the VALUE text (not the field label)
+      4. Ensure x1 < x2 and y1 < y2 for valid rectangles
+      5. Use actual detected coordinates - NEVER use (0.0, 0.0, 0.0, 0.0) for found fields
+      
+      Example: If a value appears at roughly 35% from left, 42% from top, spanning to 65% right and 48% down:
+        {x1: 0.35, y1: 0.42, x2: 0.65, y2: 0.48, page: 1}
+      
+      ADDITIONAL FIELDS (CATCH-ALL) RULES:
+      - Extract EVERYTHING else visible - aim for 10+ fields minimum
+      - Use descriptive keys: 'form_reference', 'branch_code', 'value_date', 'reference', 'charges_account', etc.
+      - Each field: {value: <extracted_value>, confidence: <0.0-1.0>, location: <description>}
+      - Flat dictionary structure - do NOT nest unless grouped data
       
       IMPORTANT: 
       - Extract numeric values without currency symbols

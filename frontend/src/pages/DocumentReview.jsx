@@ -29,7 +29,7 @@ function DocumentReview() {
     const [operation, setOperation] = useState(null)
     const [selectedVerificationIndex, setSelectedVerificationIndex] = useState(0)
     const [activeField, setActiveField] = useState(null)
-    const [appendixExpanded, setAppendixExpanded] = useState(false)
+    const [additionalFieldsExpanded, setAdditionalFieldsExpanded] = useState(false)
 
     useEffect(() => {
         fetchDocument()
@@ -215,10 +215,10 @@ function DocumentReview() {
         : []
 
     const extractedFieldEntries = Object.entries(document.extracted_data || {}).filter(([key, data]) => (
-        key !== 'appendix' && data && typeof data === 'object' && 'value' in data && 'confidence' in data
+        key !== 'additional_fields' && data && typeof data === 'object' && 'value' in data && 'confidence' in data
     ))
     
-    const appendixData = document?.extracted_data?.appendix || null
+    const additionalFieldsData = document?.extracted_data?.additional_fields || null
 
     const activeSignatureResult = signatureResults[selectedVerificationIndex] || signatureResults[0] || null
     const activeSignatureDetection = signatureDetections[selectedVerificationIndex] || signatureDetections[0] || null
@@ -364,41 +364,27 @@ function DocumentReview() {
                             ))}
                         </div>
 
-                        {/* Appendix - All Extracted Fields Dump */}
-                        {appendixData && (
+                        {/* Additional Fields - Catch-All */}
+                        {additionalFieldsData && (
                             <div style={{ marginTop: 'var(--spacing-xl)', paddingTop: 'var(--spacing-lg)', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
                                 <div 
-                                    onClick={() => setAppendixExpanded(!appendixExpanded)}
+                                    onClick={() => setAdditionalFieldsExpanded(!additionalFieldsExpanded)}
                                     style={{ 
                                         display: 'flex', 
                                         justifyContent: 'space-between', 
                                         alignItems: 'center',
                                         cursor: 'pointer',
-                                        marginBottom: appendixExpanded ? 'var(--spacing-md)' : '0'
+                                        marginBottom: additionalFieldsExpanded ? 'var(--spacing-md)' : '0'
                                     }}
                                 >
-                                    <h3>📋 Document Metadata Dump</h3>
-                                    <span style={{ fontSize: '1.5rem', transition: 'transform 0.2s', transform: appendixExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                                    <h3>📦 Additional Fields (All Other Data)</h3>
+                                    <span style={{ fontSize: '1.5rem', transition: 'transform 0.2s', transform: additionalFieldsExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
                                         ▼
                                     </span>
                                 </div>
                                 
-                                {appendixExpanded && (
+                                {additionalFieldsExpanded && (
                                     <div className="card" style={{ background: 'rgba(249, 250, 251, 1)', marginTop: 'var(--spacing-sm)' }}>
-                                        {appendixData.notes && (
-                                            <div style={{ 
-                                                padding: 'var(--spacing-sm)', 
-                                                background: 'rgba(255, 255, 255, 0.6)', 
-                                                borderRadius: 'var(--radius-sm)',
-                                                marginBottom: 'var(--spacing-md)',
-                                                fontSize: '0.875rem',
-                                                color: 'var(--color-text-secondary)',
-                                                fontStyle: 'italic'
-                                            }}>
-                                                {appendixData.notes}
-                                            </div>
-                                        )}
-                                        
                                         <pre style={{ 
                                             background: '#1e293b',
                                             color: '#e2e8f0',
@@ -410,7 +396,7 @@ function DocumentReview() {
                                             fontFamily: 'monospace',
                                             lineHeight: '1.5'
                                         }}>
-                                            {JSON.stringify(appendixData.all_fields_dump || appendixData.key_values || {}, null, 2)}
+                                            {JSON.stringify(additionalFieldsData, null, 2)}
                                         </pre>
                                     </div>
                                 )}
