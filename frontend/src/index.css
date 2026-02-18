@@ -499,6 +499,304 @@ label {
   to { transform: rotate(360deg); }
 }
 
+/* ===================================
+   Role Selector
+   =================================== */
+.role-selector {
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.role-selector-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-sm);
+}
+
+.role-selector-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.role-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.role-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.role-btn-active {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-primary);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+/* ===================================
+   Tab Bar
+   =================================== */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--color-border);
+  margin-bottom: var(--spacing-lg);
+  overflow-x: auto;
+}
+
+.tab-btn {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+.tab-btn-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* ===================================
+   Feedback Buttons
+   =================================== */
+.feedback-section {
+  margin-top: var(--spacing-lg);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.feedback-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.feedback-btn:hover {
+  border-color: var(--color-border-light);
+}
+
+.feedback-btn.selected-up {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.feedback-btn.selected-down {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.feedback-comment {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+}
+
+/* ===================================
+   Read-Only Fields
+   =================================== */
+.field-readonly {
+  background: var(--color-bg-tertiary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+}
+
+/* ===================================
+   WIP Placeholder
+   =================================== */
+.wip-placeholder {
+  text-align: center;
+  padding: var(--spacing-2xl) var(--spacing-xl);
+  color: var(--color-text-muted);
+}
+
+.wip-placeholder-icon {
+  font-size: 3rem;
+  margin-bottom: var(--spacing-md);
+  opacity: 0.5;
+}
+
+.wip-placeholder-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.wip-placeholder-text {
+  font-size: 0.875rem;
+}
+
+/* ===================================
+   Additional Badge Styles
+   =================================== */
+.badge-authenticated {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+/* HITL-aware status badges */
+.badge-pending-keyer {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.badge-pending-auth {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.badge-pending-verifier {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.badge-returned {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+/* ===================================
+   Signature Tile  — minimal card
+   =================================== */
+.signature-tile {
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background: var(--color-bg-card);
+  display: flex;
+  flex-direction: column;
+}
+
+.signature-tile:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.signature-tile-active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.28);
+}
+
+/* Label is a small badge overlaid on the image area */
+.signature-tile-label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: var(--color-primary);
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 0 0 var(--radius-sm) 0;
+  line-height: 1.6;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* White image area — signature is the focus */
+.signature-tile-image-wrap {
+  position: relative;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  flex: 1;
+}
+
+.signature-tile-image {
+  width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  display: block;
+  padding: 8px;
+}
+
+/* ===================================
+   Section Card (collapsible sections)
+   =================================== */
+.section-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--spacing-lg);
+  overflow: hidden;
+}
+
+.section-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-card-header:hover {
+  background: var(--color-bg-secondary);
+}
+
+.section-card-body {
+  padding: var(--spacing-lg);
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .split-view {

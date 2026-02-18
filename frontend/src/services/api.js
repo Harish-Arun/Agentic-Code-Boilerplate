@@ -118,8 +118,17 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify({
                 document_id: documentId,
-                run_extraction: true,
-                run_signature_verification: true
+            })
+        })
+    }
+
+    async resumeDocument(documentId, humanRole, modifications = {}) {
+        return this.request('/process/resume', {
+            method: 'POST',
+            body: JSON.stringify({
+                document_id: documentId,
+                human_role: humanRole,
+                modifications,
             })
         })
     }
@@ -148,6 +157,38 @@ class ApiService {
             url += `&status=${status}`
         }
         return this.request(url)
+    }
+
+    // ============================================
+    // Signature Authentication Endpoints
+    // ============================================
+
+    async verifySignature(documentId, signatureIndex, referenceBlob, referenceId, referenceMimeType = 'image/png', referenceSignerName = '') {
+        return this.request('/process/verify', {
+            method: 'POST',
+            body: JSON.stringify({
+                document_id: documentId,
+                signature_index: signatureIndex,
+                reference_blob: referenceBlob,
+                reference_id: referenceId,
+                reference_mime_type: referenceMimeType,
+                reference_signer_name: referenceSignerName,
+            })
+        })
+    }
+
+    // ============================================
+    // ISV (Signature Reference) Endpoints
+    // ============================================
+
+    async lookupISV(accountNumber, sortCode) {
+        return this.request('/documents/isv/lookup', {
+            method: 'POST',
+            body: JSON.stringify({
+                account_number: accountNumber,
+                sort_code: sortCode
+            })
+        })
     }
 
     // ============================================

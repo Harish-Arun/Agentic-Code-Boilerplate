@@ -1,6 +1,20 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
+import { useRole } from '../contexts/RoleContext'
+
+// Role-to-queue status mapping
+const ROLE_QUEUE_STATUS = {
+    keyer:         'PENDING_KEYER',
+    authenticator: 'PENDING_AUTH',
+    verifier:      'PENDING_VERIFIER'
+}
+
+const ROLE_QUEUE_LABELS = {
+    keyer:         'Keyer Queue - Extraction Review',
+    authenticator: 'Authenticator Queue - Signature Authentication',
+    verifier:      'Verifier Queue - Final Review'
+}
 
 // Fallback sample data shown when API is unreachable
 const SAMPLE_DOCUMENTS = [
@@ -11,7 +25,8 @@ const SAMPLE_DOCUMENTS = [
         status: 'VERIFIED',
         raw_file_path: '/uploads/payment_instruction_001.pdf',
         created_at: '2026-01-29T10:30:00Z',
-        updated_at: '2026-01-29T11:45:00Z'
+        updated_at: '2026-01-29T11:45:00Z',
+        feedback: {}
     },
     {
         id: 'DOC-002',
@@ -20,25 +35,28 @@ const SAMPLE_DOCUMENTS = [
         status: 'PROCESSING',
         raw_file_path: '/uploads/payment_instruction_002.pdf',
         created_at: '2026-01-29T11:00:00Z',
-        updated_at: '2026-01-29T11:00:00Z'
+        updated_at: '2026-01-29T11:00:00Z',
+        feedback: {}
     },
     {
         id: 'DOC-003',
         source: 'manual',
         uploaded_by: 'jane.doe',
-        status: 'INGESTED',
+        status: 'EXTRACTED',
         raw_file_path: '/uploads/payment_instruction_003.pdf',
         created_at: '2026-01-29T11:30:00Z',
-        updated_at: '2026-01-29T11:30:00Z'
+        updated_at: '2026-01-29T11:30:00Z',
+        feedback: {}
     },
     {
         id: 'DOC-004',
         source: 'manual',
         uploaded_by: 'john.smith',
-        status: 'EXTRACTED',
+        status: 'AUTHENTICATED',
         raw_file_path: '/uploads/payment_instruction_004.pdf',
         created_at: '2026-01-28T09:00:00Z',
-        updated_at: '2026-01-28T10:15:00Z'
+        updated_at: '2026-01-28T10:15:00Z',
+        feedback: {}
     },
     {
         id: 'DOC-005',
@@ -47,31 +65,42 @@ const SAMPLE_DOCUMENTS = [
         status: 'CONFIRMED',
         raw_file_path: '/uploads/payment_instruction_005.pdf',
         created_at: '2026-01-27T14:00:00Z',
-        updated_at: '2026-01-27T16:30:00Z'
+        updated_at: '2026-01-27T16:30:00Z',
+        feedback: {}
     }
 ]
 
 function DocumentList() {
+    const { role } = useRole()
     const [documents, setDocuments] = useState([])
     const [loading, setLoading] = useState(true)
     const [statusFilter, setStatusFilter] = useState('')
-    const [error, setError] = useState(null)
+
+    // Set default filter based on role
+    useEffect(() => {
+        setStatusFilter(ROLE_QUEUE_STATUS[role] || '')
+    }, [role])
 
     useEffect(() => {
         fetchDocuments()
+        // Auto-refresh every 8 seconds so status changes appear without manual reload
+        const interval = setInterval(fetchDocuments, 8000)
+        return () => clearInterval(interval)
     }, [statusFilter])
 
     const fetchDocuments = async () => {
-        setLoading(true)
+        // Use silent refresh (no loading spinner after first load)
+        if (documents.length === 0) setLoading(true)
         try {
-            // Try to fetch from API, fallback to sample data
             const response = await api.getDocuments(statusFilter)
             setDocuments(response.documents || SAMPLE_DOCUMENTS)
         } catch (err) {
             console.warn('API unavailable, showing sample data:', err.message)
-            setDocuments(SAMPLE_DOCUMENTS.filter(d =>
-                !statusFilter || d.status === statusFilter
-            ))
+            if (documents.length === 0) {
+                setDocuments(SAMPLE_DOCUMENTS.filter(d =>
+                    !statusFilter || d.status === statusFilter
+                ))
+            }
         }
         setLoading(false)
     }
@@ -81,7 +110,6 @@ function DocumentList() {
             await api.processDocument(docId)
             fetchDocuments()
         } catch (err) {
-            // Fallback: Update local state
             setDocuments(prev => prev.map(d =>
                 d.id === docId ? { ...d, status: 'PROCESSING' } : d
             ))
@@ -91,14 +119,15 @@ function DocumentList() {
     const handleFileUpload = async (event) => {
         const file = event.target.files[0]
         if (!file) return
+        event.target.value = null  // reset so the same file can be re-uploaded
 
         try {
             await api.uploadDocument(file)
-            // Refresh list
-            fetchDocuments()
+            // Switch to "All Statuses" so the newly uploaded INGESTED doc is visible
+            setStatusFilter('')
+            // fetchDocuments will fire automatically via the statusFilter useEffect
         } catch (err) {
             console.error('Upload failed:', err)
-            // Fallback: Add to local state if API fails
             const newDoc = {
                 id: `DOC-LOCAL-${Date.now()}`,
                 source: 'manual',
@@ -106,7 +135,8 @@ function DocumentList() {
                 status: 'INGESTED',
                 raw_file_path: `/uploads/${file.name}`,
                 created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                updated_at: new Date().toISOString(),
+                feedback: {}
             }
             setDocuments(prev => [newDoc, ...prev])
         }
@@ -114,18 +144,20 @@ function DocumentList() {
 
     const getStatusBadgeClass = (status) => {
         const statusMap = {
-            'INGESTED': 'badge-ingested',
-            'PROCESSING': 'badge-processing',
-            'EXTRACTED': 'badge-extracted',
-            'AUTHENTICATED': 'badge-verified',
-            'VERIFIED': 'badge-verified',
-            'AWAITING_APPROVAL': 'badge-processing',
-            'REVIEW_PENDING': 'badge-verified',
-            'CONFIRMED': 'badge-confirmed',
-            'APPROVED': 'badge-confirmed',
-            'DISPATCHED': 'badge-confirmed',
-            'REJECTED': 'badge-rejected',
-            'REVIEWED': 'badge-verified'
+            'INGESTED':         'badge-ingested',
+            'PROCESSING':       'badge-processing',
+            'PENDING_KEYER':    'badge-pending-keyer',
+            'PENDING_AUTH':     'badge-pending-auth',
+            'PENDING_VERIFIER': 'badge-pending-verifier',
+            'CONFIRMED':        'badge-confirmed',
+            'REJECTED':         'badge-rejected',
+            // legacy
+            'EXTRACTED':        'badge-pending-keyer',
+            'AUTHENTICATED':    'badge-pending-auth',
+            'VERIFIED':         'badge-pending-verifier',
+            'AWAITING_APPROVAL':'badge-processing',
+            'APPROVED':         'badge-confirmed',
+            'DISPATCHED':       'badge-confirmed',
         }
         return statusMap[status] || 'badge-ingested'
     }
@@ -144,14 +176,19 @@ function DocumentList() {
         return path.split('/').pop()
     }
 
+    const queueStatus = ROLE_QUEUE_STATUS[role]
+    const inQueueCount = documents.filter(d => d.status === queueStatus).length
+    const processingCount = documents.filter(d => d.status === 'PROCESSING').length
+    const completedCount = documents.filter(d => ['CONFIRMED', 'APPROVED', 'DISPATCHED'].includes(d.status)).length
+
     return (
         <div className="animate-fadeIn">
             {/* Page Header */}
             <div className="page-header">
                 <div>
-                    <h1>Documents</h1>
+                    <h1>My Queue</h1>
                     <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--spacing-xs)' }}>
-                        Manage and process payment instruction documents
+                        {ROLE_QUEUE_LABELS[role]}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
@@ -163,11 +200,10 @@ function DocumentList() {
                         <option value="">All Statuses</option>
                         <option value="INGESTED">Ingested</option>
                         <option value="PROCESSING">Processing</option>
-                        <option value="EXTRACTED">Extracted</option>
-                        <option value="AWAITING_APPROVAL">Awaiting Approval</option>
-                        <option value="VERIFIED">Verified</option>
+                        <option value="PENDING_KEYER">Pending Keyer</option>
+                        <option value="PENDING_AUTH">Pending Authenticator</option>
+                        <option value="PENDING_VERIFIER">Pending Verifier</option>
                         <option value="CONFIRMED">Confirmed</option>
-                        <option value="APPROVED">Approved</option>
                         <option value="REJECTED">Rejected</option>
                     </select>
                     <button
@@ -194,9 +230,9 @@ function DocumentList() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-xl)' }}>
                 {[
                     { label: 'Total', value: documents.length, color: 'var(--color-text)' },
-                    { label: 'Processing', value: documents.filter(d => d.status === 'PROCESSING').length, color: 'var(--color-warning)' },
-                    { label: 'Pending Review', value: documents.filter(d => ['EXTRACTED', 'VERIFIED', 'AWAITING_APPROVAL', 'REVIEW_PENDING'].includes(d.status)).length, color: 'var(--color-primary)' },
-                    { label: 'Completed', value: documents.filter(d => ['CONFIRMED', 'APPROVED', 'DISPATCHED'].includes(d.status)).length, color: 'var(--color-success)' }
+                    { label: 'In My Queue', value: inQueueCount, color: 'var(--color-primary)' },
+                    { label: 'Processing', value: processingCount, color: 'var(--color-warning)' },
+                    { label: 'Completed', value: completedCount, color: 'var(--color-success)' }
                 ].map((stat, i) => (
                     <div key={i} className="card" style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: '2rem', fontWeight: '700', color: stat.color }}>{stat.value}</div>
@@ -228,63 +264,73 @@ function DocumentList() {
                             </tr>
                         </thead>
                         <tbody>
-                            {documents.map(doc => (
-                                <tr key={doc.id}>
-                                    <td>
-                                        <Link to={`/documents/${doc.id}`} style={{ fontWeight: 500 }}>
-                                            {doc.id}
-                                        </Link>
-                                    </td>
-                                    <td style={{ color: 'var(--color-text-secondary)' }}>
-                                        {getFileName(doc.raw_file_path)}
-                                    </td>
-                                    <td>
-                                        <span style={{
-                                            textTransform: 'capitalize',
-                                            color: doc.source === 'manual' ? 'var(--color-info)' : 'var(--color-text-secondary)'
-                                        }}>
-                                            {doc.source.replace('_', ' ')}
-                                        </span>
-                                    </td>
-                                    <td>{doc.uploaded_by}</td>
-                                    <td>
-                                        <span className={`badge ${getStatusBadgeClass(doc.status)}`}>
-                                            {doc.status === 'PROCESSING' && (
-                                                <span className="spinner" style={{ width: 12, height: 12, marginRight: 4 }}></span>
-                                            )}
-                                            {doc.status}
-                                        </span>
-                                    </td>
-                                    <td style={{ color: 'var(--color-text-secondary)' }}>
-                                        {formatDate(doc.updated_at)}
-                                    </td>
-                                    <td>
-                                        <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-                                            {doc.status === 'INGESTED' && (
-                                                <button
-                                                    className="btn btn-primary"
-                                                    onClick={() => handleProcess(doc.id)}
+                            {documents.map(doc => {
+                                const isReturned = doc.feedback?.returned_from === 'verifier'
+                                return (
+                                    <tr key={doc.id}>
+                                        <td>
+                                            <Link to={`/documents/${doc.id}`} style={{ fontWeight: 500 }}>
+                                                {doc.id}
+                                            </Link>
+                                        </td>
+                                        <td style={{ color: 'var(--color-text-secondary)' }}>
+                                            {getFileName(doc.raw_file_path)}
+                                        </td>
+                                        <td>
+                                            <span style={{
+                                                textTransform: 'capitalize',
+                                                color: doc.source === 'manual' ? 'var(--color-info)' : 'var(--color-text-secondary)'
+                                            }}>
+                                                {doc.source.replace('_', ' ')}
+                                            </span>
+                                        </td>
+                                        <td>{doc.uploaded_by}</td>
+                                        <td>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
+                                                <span className={`badge ${getStatusBadgeClass(doc.status)}`}>
+                                                    {doc.status === 'PROCESSING' && (
+                                                        <span className="spinner" style={{ width: 12, height: 12, marginRight: 4 }}></span>
+                                                    )}
+                                                    {doc.status}
+                                                </span>
+                                                {isReturned && (
+                                                    <span className="badge badge-returned" style={{ fontSize: '0.65rem' }}>
+                                                        Returned
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td style={{ color: 'var(--color-text-secondary)' }}>
+                                            {formatDate(doc.updated_at)}
+                                        </td>
+                                        <td>
+                                            <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                                                {doc.status === 'INGESTED' && (
+                                                    <button
+                                                        className="btn btn-primary"
+                                                        onClick={() => handleProcess(doc.id)}
+                                                        style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+                                                    >
+                                                        Process
+                                                    </button>
+                                                )}
+                                                <Link
+                                                    to={`/documents/${doc.id}`}
+                                                    className="btn btn-secondary"
                                                     style={{ padding: '4px 12px', fontSize: '0.75rem' }}
                                                 >
-                                                    Process
-                                                </button>
-                                            )}
-                                            <Link
-                                                to={`/documents/${doc.id}`}
-                                                className="btn btn-secondary"
-                                                style={{ padding: '4px 12px', fontSize: '0.75rem' }}
-                                            >
-                                                View
-                                            </Link>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                                                    {doc.status === queueStatus ? 'Review' : 'View'}
+                                                </Link>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )
+                            })}
                         </tbody>
                     </table>
                 )}
             </div>
-        </div >
+        </div>
     )
 }
 
