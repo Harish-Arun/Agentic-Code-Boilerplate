@@ -181,11 +181,8 @@ export default function PdfHighlightViewer({
         : null
 
     const toOverlayStyle = (box) => {
-        const canvasWidth = Number(pageSize.width || 0)
-        const canvasHeight = Number(pageSize.height || 0)
-
-        if (canvasWidth <= 0 || canvasHeight <= 0) {
-            return { left: 0, top: 0, width: 0, height: 0 }
+        if (!box) {
+            return { left: '0%', top: '0%', width: '0%', height: '0%', display: 'none' }
         }
 
         const x1Norm = Math.max(0, Math.min(1, Number(box?.x1 || 0)))
@@ -193,16 +190,16 @@ export default function PdfHighlightViewer({
         const x2Norm = Math.max(0, Math.min(1, Number(box?.x2 || 0)))
         const y2Norm = Math.max(0, Math.min(1, Number(box?.y2 || 0)))
 
-        const left = Math.min(x1Norm, x2Norm) * canvasWidth
-        const top = Math.min(y1Norm, y2Norm) * canvasHeight
-        const width = Math.abs(x2Norm - x1Norm) * canvasWidth
-        const height = Math.abs(y2Norm - y1Norm) * canvasHeight
+        const left = Math.min(x1Norm, x2Norm) * 100
+        const top = Math.min(y1Norm, y2Norm) * 100
+        const width = Math.abs(x2Norm - x1Norm) * 100
+        const height = Math.abs(y2Norm - y1Norm) * 100
 
         return {
-            left,
-            top,
-            width,
-            height
+            left: `${left}%`,
+            top: `${top}%`,
+            width: `${width}%`,
+            height: `${height}%`
         }
     }
 
@@ -221,21 +218,21 @@ export default function PdfHighlightViewer({
             <div className="pdf-canvas-wrap" ref={containerRef}>
                 {error && <div className="pdf-error">{error}</div>}
                 {!error && (
-                    <div className="pdf-canvas-stack" style={{ width: pageSize.width || '100%', height: pageSize.height || 520 }}>
+                    <div className="pdf-canvas-stack">
                         <canvas ref={canvasRef} className="pdf-canvas" />
 
                         {fieldBox && <div className="pdf-overlay pdf-overlay-field" style={toOverlayStyle(fieldBox)} />}
                         {signatureBox && <div className="pdf-overlay pdf-overlay-signature" style={toOverlayStyle(signatureBox)} />}
 
-                        {!fieldBox && textHighlights.map((rect, idx) => (
+                        {!fieldBox && pageSize.width > 0 && textHighlights.map((rect, idx) => (
                             <div
                                 key={`text-h-${idx}`}
                                 className="pdf-overlay pdf-overlay-field"
                                 style={{
-                                    left: rect.left,
-                                    top: rect.top,
-                                    width: rect.width,
-                                    height: rect.height
+                                    left: `${(rect.left / pageSize.width) * 100}%`,
+                                    top: `${(rect.top / pageSize.height) * 100}%`,
+                                    width: `${(rect.width / pageSize.width) * 100}%`,
+                                    height: `${(rect.height / pageSize.height) * 100}%`
                                 }}
                             />
                         ))}

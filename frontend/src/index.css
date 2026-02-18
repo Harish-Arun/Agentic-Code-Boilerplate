@@ -444,11 +444,13 @@ label {
   width: 100%;
   display: flex;
   justify-content: center;
+  overflow: auto;
 }
 
 .pdf-canvas-stack {
   position: relative;
   max-width: 100%;
+  display: inline-block;
 }
 
 .pdf-canvas {
@@ -464,6 +466,7 @@ label {
   position: absolute;
   border-radius: 4px;
   pointer-events: none;
+  box-sizing: border-box;
 }
 
 .pdf-overlay-field {

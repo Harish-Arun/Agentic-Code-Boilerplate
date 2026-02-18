@@ -56,19 +56,19 @@ llm:
 
   gemini:
     model: "${GEMINI_MODEL:-gemini-3-flash-preview}"
-    temperature: 0.0
-    max_tokens: null  # null = unlimited
-    top_k: 1
-    top_p: 0.1
-    candidate_count: 1
+    temperature: ${GEMINI_TEMPERATURE:-0.0}
+    max_tokens: null  # null = unlimited (rarely needs to be changed)
+    top_k: ${GEMINI_TOP_K:-1}
+    top_p: ${GEMINI_TOP_P:-0.1}
+    candidate_count: ${GEMINI_CANDIDATE_COUNT:-1}
     # Thinking configuration
-    thinking_budget: -1  # -1=dynamic, 0=off, >0=specific tokens (Gemini 2.5)
-    thinking_level: null  # minimal, low, medium, high (Gemini 3)
-    include_thoughts: false  # Include thought summaries in response
+    thinking_budget: ${GEMINI_THINKING_BUDGET:--1}  # -1=dynamic, 0=off, >0=specific tokens (Gemini 2.5)
+    thinking_level: "${GEMINI_THINKING_LEVEL:-null}"  # minimal, low, medium, high (Gemini 3)
+    include_thoughts: ${GEMINI_INCLUDE_THOUGHTS:-false}  # Include thought summaries in response
 
   openai:
-    model: "gpt-4"
-    temperature: 0.1
+    model: "${OPENAI_MODEL:-gpt-4}"
+    temperature: ${OPENAI_TEMPERATURE:-0.1}
 
   azure:
     endpoint: "${AZURE_OPENAI_ENDPOINT:-}"
