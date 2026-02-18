@@ -11,6 +11,7 @@ langchain-core>=0.2.0
 
 # Checkpointing (for persistence)
 langgraph-checkpoint>=1.0.0
+langgraph-checkpoint-sqlite>=1.0.0  # SQLite-backed HITL state persistence
 # langgraph-checkpoint-postgres>=1.0.0 # Uncomment for Postgres support
 
 # MCP Client

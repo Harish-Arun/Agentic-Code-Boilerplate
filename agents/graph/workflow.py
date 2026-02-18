@@ -1,383 +1,287 @@
-"""
-LangGraph Workflow Definition - Main processing pipeline.
-
-This defines the state graph that orchestrates all agents:
-Start → Extraction → Signature Detection → Verification → End
-
-Features:
-- Configurable checkpointing (memory, postgres)
-- Human-in-the-loop interrupt points
-- Resume workflow capability
-"""
 import os
-from typing import Optional, Tuple
 from datetime import datetime
+from pathlib import Path
+from typing import Optional, Tuple
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
+from models.schemas import AgentState
+from config.loader import AppConfig
 
-from models import AgentState
-from config import AppConfig
+from graph.nodes.extraction import extraction_node
+from graph.nodes.signature_detection import signature_detection_node
 
-from .nodes.extraction import extraction_node
-from .nodes.signature_detection import signature_detection_node
-from .nodes.verification import verification_node
 
+# ============================================
+# Conditional Edge Functions
+# ============================================
 
 def should_continue_after_extraction(state) -> str:
-    """
-    Decide whether to continue after extraction based on success.
-    
-    Returns:
-        "continue" if extraction succeeded, "end" if it failed
-    """
-    # Handle both dict and AgentState objects
+    """Stop the graph if extraction failed; otherwise continue to detection."""
     if isinstance(state, dict):
         extraction_attempts = state.get("extraction_attempts", [])
         extraction_errors = state.get("extraction_errors", [])
         extracted_payment = state.get("extracted_payment")
     else:
-        # AgentState object
         extraction_attempts = state.extraction_attempts
         extraction_errors = state.extraction_errors
         extracted_payment = state.extracted_payment
-    
-    # Check if extraction succeeded
-    if extraction_attempts:
-        latest_attempt = extraction_attempts[-1]
-        success = latest_attempt.success if hasattr(latest_attempt, 'success') else latest_attempt.get("success", False)
-        if success:
-            return "continue"
-    
-    # Check for critical errors
+
     if extraction_errors:
         return "end"
-    
-    # No extraction data but no errors - allow continuation (might be optional)
+
+    if extraction_attempts:
+        latest = extraction_attempts[-1]
+        succeeded = latest.success if hasattr(latest, "success") else latest.get("success", False)
+        if succeeded:
+            return "continue"
+
     return "continue" if extracted_payment else "end"
 
 
 def should_continue_after_detection(state) -> str:
     """
-    Decide whether to continue to verification based on detection success.
-    
-    Returns:
-        "continue" if signatures were detected, "end" otherwise
+    After detection, always proceed to keyer_review (interrupt point).
+    Only hard-stop on detection errors — a doc with no sigs is still valid.
     """
-    # Handle both dict and AgentState objects
     if isinstance(state, dict):
-        signature_detections = state.get("signature_detections", [])
+        detection_errors = state.get("detection_errors", [])
     else:
-        # AgentState object
-        signature_detections = state.signature_detections
-    
-    # Check if detection succeeded and found signatures
-    if signature_detections and len(signature_detections) > 0:
-        return "continue"
-    
-    # No signatures found or detection failed
-    return "end"
+        detection_errors = state.detection_errors
+
+    return "end" if detection_errors else "continue"
 
 
-def create_checkpointer(config: AppConfig) -> Optional[BaseCheckpointSaver]:
+# ============================================
+# HITL Node Bodies
+# (LangGraph interrupts BEFORE these nodes;
+#  each body runs AFTER the human resumes)
+# ============================================
+
+def keyer_review_node(state) -> dict:
     """
-    Create a checkpointer based on configuration.
-    
-    Supported backends:
-    - memory: In-memory (development only, lost on restart)
-    - postgres: PostgreSQL (production, persistent)
+    Keyer HITL checkpoint body — runs after Keyer clicks Proceed.
+
+    The interrupt fires BEFORE this node. The /resume call passes
+    field corrections and feedback via human_modifications.
+    Sets current_step so api-service transitions doc to AUTHENTICATED.
     """
-    if not config.agents.checkpointing.enabled:
-        return None
-    
-    backend = config.agents.checkpointing.backend
-    
-    if backend == "memory":
-        return MemorySaver()
-    
-    elif backend == "postgres":
-        # Production: Use PostgreSQL for persistent checkpoints
-        try:
-            from importlib import import_module
-            postgres_module = import_module("langgraph.checkpoint.postgres")
-            PostgresSaver = getattr(postgres_module, "PostgresSaver")
-            conn_string = os.environ.get(
-                "CHECKPOINT_POSTGRES_CONN", 
-                "postgresql://postgres:postgres@localhost:5432/nnp_ai"
-            )
-            return PostgresSaver.from_conn_string(conn_string)
-        except ImportError:
-            print("⚠️ langgraph-checkpoint-postgres not installed, falling back to memory")
-            return MemorySaver()
-    
-    # Default to memory
-    return MemorySaver()
+    # LangGraph passes an AgentState Pydantic model, not a plain dict
+    s = state.model_dump() if hasattr(state, "model_dump") else dict(state)
+    s["current_step"] = "keyer_review_done"
+    s["awaiting_approval"] = False
+    s.setdefault("history", []).append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "step": "keyer_review",
+        "action": "keyer_approved",
+        "data": {"edited_fields": list(s.get("human_modifications", {}).keys())},
+        "agent": "keyer",
+        "notes": "Keyer reviewed extraction and clicked Proceed"
+    })
+    return s
 
 
-def create_workflow(config: AppConfig) -> Tuple[StateGraph, Optional[BaseCheckpointSaver]]:
+def auth_review_node(state) -> dict:
     """
-    Create the LangGraph workflow for document processing.
-    
-    Returns:
-        Tuple of (compiled_graph, checkpointer)
-    
-    The graph structure:
-    
-    [Start]
-       ↓
-    [Extraction Agent] ──→ Extract payment fields
-       ↓
-    [Human Review] ──→ INTERRUPT (if HITL enabled)
-       ↓
-    [Signature Detection] ──→ Find signature regions
-       ↓
-    [Verification Agent] ──→ Verify signatures
-       ↓
-    [End]
+    Authenticator HITL checkpoint body — runs after Authenticator clicks Proceed.
+
+    Sets current_step so api-service transitions doc to VERIFIED.
     """
-    
-    # Define async node wrappers with config
-    async def run_extraction(state):
+    s = state.model_dump() if hasattr(state, "model_dump") else dict(state)
+    s["current_step"] = "auth_review_done"
+    s["awaiting_approval"] = False
+    s.setdefault("history", []).append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "step": "auth_review",
+        "action": "authenticator_approved",
+        "data": s.get("human_modifications", {}),
+        "agent": "authenticator",
+        "notes": "Authenticator completed validation and clicked Proceed"
+    })
+    return s
+
+
+def verifier_review_node(state) -> dict:
+    """
+    Verifier HITL checkpoint body — runs after Verifier clicks Accept or Reject.
+
+    Reads human_modifications.decision ("accept" | "reject").
+    Sets current_step so the completion_node and api-service know the final decision.
+    """
+    s = state.model_dump() if hasattr(state, "model_dump") else dict(state)
+    human_mods = s.get("human_modifications", {})
+    decision = human_mods.get("decision", "accept")
+    s["current_step"] = f"verifier_{decision}"   # "verifier_accept" or "verifier_reject"
+    s["awaiting_approval"] = False
+    s.setdefault("history", []).append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "step": "verifier_review",
+        "action": f"verifier_{decision}",
+        "data": {"decision": decision, "feedback": human_mods.get("feedback", "")},
+        "agent": "verifier",
+        "notes": f"Verifier {'accepted' if decision == 'accept' else 'rejected'} the document"
+    })
+    return s
+
+
+def completion_node(state) -> dict:
+    """
+    Final node — marks workflow complete (accepted) or rejected.
+    Runs synchronously after verifier resumes.
+    """
+    s = state.model_dump() if hasattr(state, "model_dump") else dict(state)
+    # Inherit decision from verifier_review_node
+    prev_step = s.get("current_step", "")
+    if "reject" in prev_step:
+        s["current_step"] = "rejected"
+        notes = "Verifier rejected — document returned to Keyer queue"
+    else:
+        s["current_step"] = "complete"
+        notes = "Workflow complete — document confirmed and dispatched"
+    s.setdefault("history", []).append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "step": "completion",
+        "action": s["current_step"],
+        "data": {},
+        "agent": "system",
+        "notes": notes
+    })
+    return s
+
+
+# ============================================
+# Checkpointer DB Path Helper
+# ============================================
+
+def get_checkpoint_db_path() -> str:
+    """Return the absolute path to the SQLite checkpoints DB file."""
+    default_data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+    data_dir = Path(os.environ.get("DATA_DIR", str(default_data_dir)))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return str(data_dir / "checkpoints.db")
+
+
+# ============================================
+# Graph Construction
+# ============================================
+
+def create_workflow(
+    config: AppConfig,
+    checkpointer: Optional[BaseCheckpointSaver] = None,
+) -> Tuple[StateGraph, BaseCheckpointSaver]:
+    """
+    Build and compile the LangGraph workflow.
+
+    checkpointer should be an AsyncSqliteSaver created and managed
+    by the caller's async lifespan context. Falls back to MemorySaver
+    if none is provided (loses state on restart).
+
+    Graph:
+      extraction -> detection
+        -> [INTERRUPT keyer_review]     (Keyer edits fields, clicks Proceed)
+        -> [INTERRUPT auth_review]      (Authenticator authenticates per tile, clicks Proceed)
+        -> [INTERRUPT verifier_review]  (Verifier reads all, clicks Accept/Reject)
+        -> completion -> END
+    Signature authentication is manual: Authenticator calls /run/verify per tile,
+    which stores results back into the checkpoint via aupdate_state.
+    """
+    if checkpointer is None:
+        print("⚠️  No checkpointer provided — falling back to MemorySaver (state lost on restart)")
+        checkpointer = MemorySaver()
+
+    async def run_extraction_node(state):
         return await extraction_node_wrapper(state, config)
 
-    async def run_signature(state):
+    async def run_detection_node(state):
         return await signature_detection_wrapper(state, config)
 
-    async def run_verification(state):
-        return await verification_wrapper(state, config)
-
-    # Create the state graph
     graph = StateGraph(AgentState)
-    
-    # Add nodes based on enabled agents
-    enabled_agents = config.agents.enabled
-    
-    # Always start with extraction if enabled
-    if "extraction" in enabled_agents:
-        graph.add_node("extraction", run_extraction)
-    
-    # Add human review node if HITL enabled
-    if config.features.human_in_loop:
-        graph.add_node("human_review", human_review_node)
-    
-    if "signature_detection" in enabled_agents:
-        graph.add_node("signature_detection", run_signature)
-    
-    if "verification" in enabled_agents:
-        graph.add_node("verification", run_verification)
-    
-    # Define edges based on enabled agents
-    if "extraction" in enabled_agents:
-        graph.set_entry_point("extraction")
-        
-        if config.features.human_in_loop:
-            # Extraction → Human Review → Signature Detection
-            graph.add_conditional_edges(
-                "extraction",
-                should_continue_after_extraction,
-                {
-                    "continue": "human_review",
-                    "end": END
-                }
-            )
-            
-            if "signature_detection" in enabled_agents:
-                graph.add_edge("human_review", "signature_detection")
-                
-                if "verification" in enabled_agents:
-                    graph.add_conditional_edges(
-                        "signature_detection",
-                        should_continue_after_detection,
-                        {
-                            "continue": "verification",
-                            "end": END
-                        }
-                    )
-                    graph.add_edge("verification", END)
-                else:
-                    graph.add_edge("signature_detection", END)
-            else:
-                graph.add_edge("human_review", END)
-        else:
-            # No HITL - direct flow with conditional edges
-            if "signature_detection" in enabled_agents:
-                graph.add_conditional_edges(
-                    "extraction",
-                    should_continue_after_extraction,
-                    {
-                        "continue": "signature_detection",
-                        "end": END
-                    }
-                )
-                
-                if "verification" in enabled_agents:
-                    graph.add_conditional_edges(
-                        "signature_detection",
-                        should_continue_after_detection,
-                        {
-                            "continue": "verification",
-                            "end": END
-                        }
-                    )
-                    graph.add_edge("verification", END)
-                else:
-                    graph.add_edge("signature_detection", END)
-            else:
-                graph.add_edge("extraction", END)
-                
-    elif "signature_detection" in enabled_agents:
-        graph.set_entry_point("signature_detection")
-        
-        if "verification" in enabled_agents:
-            graph.add_edge("signature_detection", "verification")
-            graph.add_edge("verification", END)
-        else:
-            graph.add_edge("signature_detection", END)
-            
-    elif "verification" in enabled_agents:
-        graph.set_entry_point("verification")
-        graph.add_edge("verification", END)
-    
-    # Create checkpointer
-    checkpointer = create_checkpointer(config)
-    
-    # Compile with checkpointer and interrupt points
-    interrupt_before = []
-    if config.features.human_in_loop:
-        interrupt_before = ["human_review"]  # Pause before human review
-    
+
+    graph.add_node("extraction",          run_extraction_node)
+    graph.add_node("signature_detection", run_detection_node)
+    graph.add_node("keyer_review",        keyer_review_node)
+    graph.add_node("auth_review",         auth_review_node)
+    graph.add_node("verifier_review",     verifier_review_node)
+    graph.add_node("completion",          completion_node)
+
+    graph.set_entry_point("extraction")
+
+    graph.add_conditional_edges(
+        "extraction",
+        should_continue_after_extraction,
+        {"continue": "signature_detection", "end": END}
+    )
+    graph.add_conditional_edges(
+        "signature_detection",
+        should_continue_after_detection,
+        {"continue": "keyer_review", "end": END}
+    )
+
+    graph.add_edge("keyer_review",    "auth_review")
+    graph.add_edge("auth_review",     "verifier_review")
+    graph.add_edge("verifier_review", "completion")
+    graph.add_edge("completion",      END)
+
     compiled = graph.compile(
         checkpointer=checkpointer,
-        interrupt_before=interrupt_before
+        interrupt_before=["keyer_review", "auth_review", "verifier_review"]
     )
-    
+
     return compiled, checkpointer
 
 
-def human_review_node(state: dict) -> dict:
-    """
-    Human review node - this is where the workflow pauses for approval.
-    
-    When resumed, the workflow continues with the (potentially modified) state.
-    """
-    state["current_step"] = "human_review"
-    state["awaiting_approval"] = True
-    
-    # Add history entry for human review pause
-    if "history" not in state:
-        state["history"] = []
-    
-    from datetime import datetime
-    state["history"].append({
-        "timestamp": datetime.utcnow().isoformat(),
-        "step": "human_review",
-        "action": "awaiting_approval",
-        "data": {},
-        "agent": "workflow",
-        "notes": "Workflow paused for human review"
-    })
-    
-    return state
+# ============================================
+# Node Wrappers  (dict <-> AgentState bridge)
+# ============================================
+
+def _ensure_agent_state(state: dict) -> AgentState:
+    """Safely coerce a raw LangGraph state dict into an AgentState."""
+    state.setdefault("extraction_attempts", [])
+    state.setdefault("detection_attempts", [])
+    state.setdefault("verification_attempts", [])
+    state.setdefault("history", [])
+    state.setdefault("human_modifications", {})
+    return AgentState(**state)
 
 
-# ============================================
-# Node Wrappers (sync/async handling)
-# ============================================
 async def extraction_node_wrapper(state: dict, config: AppConfig) -> dict:
-    """Async wrapper for extraction node."""
-    # Convert dict to AgentState if needed
-    if isinstance(state, dict):
-        # Handle missing fields gracefully
-        state.setdefault("extraction_attempts", [])
-        state.setdefault("detection_attempts", [])
-        state.setdefault("verification_attempts", [])
-        state.setdefault("history", [])
-        state.setdefault("human_modifications", {})
-        agent_state = AgentState(**state)
-    else:
-        agent_state = state
-    
+    agent_state = _ensure_agent_state(state) if isinstance(state, dict) else state
     result = await extraction_node(agent_state, config)
     return result.model_dump()
 
 
 async def signature_detection_wrapper(state: dict, config: AppConfig) -> dict:
-    """Async wrapper for signature detection node."""
-    if isinstance(state, dict):
-        # Handle missing fields gracefully
-        state.setdefault("extraction_attempts", [])
-        state.setdefault("detection_attempts", [])
-        state.setdefault("verification_attempts", [])
-        state.setdefault("history", [])
-        state.setdefault("human_modifications", {})
-        agent_state = AgentState(**state)
-    else:
-        agent_state = state
-    
+    agent_state = _ensure_agent_state(state) if isinstance(state, dict) else state
     result = await signature_detection_node(agent_state, config)
     return result.model_dump()
 
 
-async def verification_wrapper(state: dict, config: AppConfig) -> dict:
-    """Async wrapper for verification node."""
-    if isinstance(state, dict):
-        # Handle missing fields gracefully
-        state.setdefault("extraction_attempts", [])
-        state.setdefault("detection_attempts", [])
-        state.setdefault("verification_attempts", [])
-        state.setdefault("history", [])
-        state.setdefault("human_modifications", {})
-        agent_state = AgentState(**state)
-    else:
-        agent_state = state
-    
-    result = await verification_node(agent_state, config)
-    return result.model_dump()
-
-
 # ============================================
-# Workflow Execution Functions
+# Workflow Execution Helpers
 # ============================================
+
 async def run_workflow(
-    workflow, 
+    workflow,
     initial_state: AgentState,
     thread_id: Optional[str] = None,
-    run_extraction: bool = True,
-    run_signature: bool = True
+    **kwargs  # absorb legacy run_extraction / run_signature flags
 ) -> AgentState:
     """
-    Execute the workflow with the given initial state.
-    
-    Args:
-        workflow: Compiled LangGraph workflow
-        initial_state: Starting state with document info
-        thread_id: Unique ID for checkpointing (use document_id)
-        run_extraction: Whether to run extraction agent
-        run_signature: Whether to run signature agents
-    
-    Returns:
-        Final AgentState with all results
+    Start a new workflow run from the beginning.
+    Returns after the first HITL interrupt (keyer_review) with awaiting_approval=True.
     """
-    # Set timestamps
     initial_state.started_at = datetime.utcnow()
-    
-    # Build config with thread_id for checkpointing
-    config = {}
-    if thread_id:
-        config = {"configurable": {"thread_id": thread_id}}
-    
-    # Run the graph
-    result = await workflow.ainvoke(initial_state.model_dump(), config)
-    
-    # Convert back to AgentState
+    initial_state.awaiting_approval = True
+    lg_config = {"configurable": {"thread_id": thread_id}} if thread_id else {}
+
+    result = await workflow.ainvoke(initial_state.model_dump(), lg_config)
+
     final_state = AgentState(**result)
-    final_state.completed_at = datetime.utcnow()
-    
+    if final_state.current_step == "complete":
+        final_state.completed_at = datetime.utcnow()
+
     return final_state
 
 
@@ -387,38 +291,33 @@ async def resume_workflow(
     updated_state: Optional[dict] = None
 ) -> AgentState:
     """
-    Resume a paused workflow from its last checkpoint.
-    
-    Args:
-        workflow: Compiled LangGraph workflow
-        thread_id: The thread_id used when workflow was started
-        updated_state: Optional state updates (e.g., after human review)
-    
-    Returns:
-        Final AgentState after resumption
+    Resume a paused workflow after a HITL checkpoint.
+
+    updated_state carries the human changes (edited fields, feedback).
+    The graph runs until the next interrupt or END.
+
+    Keyer Proceed  -> resumes past keyer_review, pauses at auth_review
+    Auth Proceed   -> resumes past auth_review, runs completion, reaches END
     """
-    config = {"configurable": {"thread_id": thread_id}}
-    
-    # Resume with optional state updates
-    input_state = updated_state if updated_state else None
-    result = await workflow.ainvoke(input_state, config)
-    
+    lg_config = {"configurable": {"thread_id": thread_id}}
+
+    if updated_state:
+        await workflow.aupdate_state(lg_config, updated_state)
+
+    result = await workflow.ainvoke(None, lg_config)
+
     final_state = AgentState(**result)
-    final_state.completed_at = datetime.utcnow()
-    
+    if final_state.current_step == "complete":
+        final_state.completed_at = datetime.utcnow()
+
     return final_state
 
 
-def get_workflow_state(workflow, thread_id: str) -> Optional[dict]:
-    """
-    Get the current state of a workflow by thread_id.
-    
-    Useful for checking if workflow is paused, getting intermediate results.
-    """
-    config = {"configurable": {"thread_id": thread_id}}
-    
+async def get_workflow_state(workflow, thread_id: str) -> Optional[dict]:
+    """Return the current checkpointed state dict for a thread, or None."""
+    lg_config = {"configurable": {"thread_id": thread_id}}
     try:
-        state = workflow.get_state(config)
-        return state.values if state else None
+        snapshot = await workflow.aget_state(lg_config)
+        return snapshot.values if snapshot else None
     except Exception:
         return None

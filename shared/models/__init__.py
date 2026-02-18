@@ -20,6 +20,9 @@ from .schemas import (
     AgentState,
     HealthResponse,
     ErrorResponse,
+    ISVLookupRequest,
+    ISVLookupResponse,
+    ISVSignatory,
 )
 
 from .metrics import (
@@ -75,4 +78,7 @@ __all__ = [
     "calculate_confidence_fiv1",
     "HealthResponse",
     "ErrorResponse",
+    "ISVLookupRequest",
+    "ISVLookupResponse",
+    "ISVSignatory",
 ]

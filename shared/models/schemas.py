@@ -12,18 +12,21 @@ import uuid
 # Document Status Enum
 # ============================================
 class DocumentStatus(str, Enum):
-    INGESTED = "INGESTED"
-    PROCESSING = "PROCESSING"
-    EXTRACTED = "EXTRACTED"
-    VERIFIED = "VERIFIED"
-    REVIEWED = "REVIEWED"
-    CONFIRMED = "CONFIRMED"
-    REJECTED = "REJECTED"
+    INGESTED          = "INGESTED"           # Uploaded, not yet processed
+    PROCESSING        = "PROCESSING"         # Workflow running
+    PENDING_KEYER     = "PENDING_KEYER"      # Paused at keyer_review — awaiting Keyer
+    PENDING_AUTH      = "PENDING_AUTH"       # Paused at auth_review — awaiting Authenticator
+    PENDING_VERIFIER  = "PENDING_VERIFIER"   # Paused at verifier_review — awaiting Verifier
+    CONFIRMED         = "CONFIRMED"          # Verifier accepted
+    REJECTED          = "REJECTED"           # Verifier rejected (returned to Keyer)
+    # Legacy aliases kept for DB backwards-compat
+    EXTRACTED         = "EXTRACTED"
+    AUTHENTICATED     = "AUTHENTICATED"
+    VERIFIED          = "VERIFIED"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
-    AUTHENTICATED = "AUTHENTICATED"
-    REVIEW_PENDING = "REVIEW_PENDING"
-    APPROVED = "APPROVED"
-    DISPATCHED = "DISPATCHED"
+    REVIEW_PENDING    = "REVIEW_PENDING"
+    APPROVED          = "APPROVED"
+    DISPATCHED        = "DISPATCHED"
 
 
 # ============================================
@@ -43,6 +46,8 @@ class DocumentUpdate(BaseModel):
     extracted_data: Optional[Dict[str, Any]] = None
     signature_result: Optional[Dict[str, Any]] = None
     thinking_traces: Optional[List[Dict[str, Any]]] = None
+    authentication_result: Optional[Dict[str, Any]] = None
+    feedback: Optional[Dict[str, Any]] = None
 
 
 class Document(BaseModel):
@@ -55,6 +60,8 @@ class Document(BaseModel):
     extracted_data: Dict[str, Any] = Field(default_factory=dict)
     signature_result: Dict[str, Any] = Field(default_factory=dict)
     thinking_traces: List[Dict[str, Any]] = Field(default_factory=list)
+    authentication_result: Dict[str, Any] = Field(default_factory=dict)
+    feedback: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -275,10 +282,18 @@ class AgentState(BaseModel):
     document_path: str
     current_step: str = "start"
     
+    #Phase control for role-based workflow
+    target_phase: str = "authentication"  # authentication, verification
+    
     # Human-in-the-loop tracking
     awaiting_approval: bool = False
     human_modifications: Dict[str, Any] = Field(default_factory=dict)
-    
+
+    # Manual signature authentication results stored per-tile by Authenticator.
+    # Key = str(sig_index), value = full verify result dict.
+    # Updated via aupdate_state during the auth_review interrupt so LangGraph owns the state.
+    manual_verification_results: Dict[str, Any] = Field(default_factory=dict)
+
     # Extraction results (latest + history)
     extracted_payment: Optional[ExtractedPayment] = None
     extraction_attempts: List[ExtractionAttempt] = Field(default_factory=list)
@@ -388,3 +403,46 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     code: str = "INTERNAL_ERROR"
+
+
+# ============================================
+# ISV (Image Signature Verification) Models
+# ============================================
+class ISVLookupRequest(BaseModel):
+    """Request to look up reference signatures from ISV."""
+    account_number: str
+    sort_code: str
+
+
+class ISVSignatory(BaseModel):
+    """A signatory from the ISV response."""
+    sigId: str
+    signerName: str
+    signatureGif: str = ""  # base64-encoded signature image
+    signatureMimeType: str = "image/gif"  # MIME type for signatureGif blob
+    signatureStatus: str = "ACTIVE"
+    signerRole: str = "AUTHORISED_SIGNATORY"
+    groupCode: str = ""
+    desCode: int = 0
+    verifiedFlag: str = "1"
+    statusFlag: str = "1"
+
+
+class ISVLookupResponse(BaseModel):
+    """Response from ISV signature lookup."""
+    sortCode: str
+    accountNumber: str
+    accountName: str
+    statusFlag: str = "1"
+    accountType: str = "T9"
+    accoperator: str = ""
+    accCreateDate: Optional[str] = None
+    accUpdateDate: Optional[str] = None
+    ruleCode: str = "99"
+    freeformRule: str = ""
+    signRuleCreateDate: Optional[str] = None
+    signRuleUpdateDate: Optional[str] = None
+    appName: str = ""
+    signRuleOperator: str = ""
+    referenceNumber: str = ""
+    signatories: List[ISVSignatory] = Field(default_factory=list)

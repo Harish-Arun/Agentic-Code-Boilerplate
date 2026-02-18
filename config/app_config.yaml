@@ -122,7 +122,7 @@ mcp:
 # Feature Flags
 # ============================================
 features:
-  human_in_loop: false  # Set true for production (Stage 4)
+  human_in_loop: true  # HITL enabled — Proceed buttons resume LangGraph thread
   signature_verification: true
   auto_extraction: true
   audit_logging: true
