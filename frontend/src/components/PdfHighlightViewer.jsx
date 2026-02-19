@@ -60,6 +60,7 @@ export default function PdfHighlightViewer({
 }) {
     const containerRef = useRef(null)
     const canvasRef = useRef(null)
+    const renderTaskRef = useRef(null)   // track active PDF.js render task for proper cancellation
 
     const [pdfDoc, setPdfDoc] = useState(null)
     const [pageNumber, setPageNumber] = useState(1)
@@ -116,6 +117,14 @@ export default function PdfHighlightViewer({
         let cancelled = false
 
         const renderPage = async () => {
+            // Cancel any in-progress PDF.js render before starting a new one.
+            // Without this, two renders on the same canvas cause a PDF.js error
+            // ("There is already a pending render task") caught as "Failed to render".
+            if (renderTaskRef.current) {
+                renderTaskRef.current.cancel()
+                renderTaskRef.current = null
+            }
+
             try {
                 setLoading(true)
 
@@ -132,7 +141,10 @@ export default function PdfHighlightViewer({
                 canvas.width = viewport.width
                 canvas.height = viewport.height
 
-                await page.render({ canvasContext: context, viewport }).promise
+                const task = page.render({ canvasContext: context, viewport })
+                renderTaskRef.current = task
+                await task.promise
+                renderTaskRef.current = null
                 if (cancelled) return
 
                 setPageSize({ width: viewport.width, height: viewport.height })
@@ -155,6 +167,8 @@ export default function PdfHighlightViewer({
                     setTextHighlights(matches.slice(0, 12))
                 }
             } catch (err) {
+                // RenderingCancelledException is expected when a new render preempts this one
+                if (err?.name === 'RenderingCancelledException') return
                 if (!cancelled) {
                     setError('Failed to render selected page')
                 }
@@ -169,6 +183,11 @@ export default function PdfHighlightViewer({
         renderPage()
         return () => {
             cancelled = true
+            // Also cancel any in-flight PDF.js task on unmount / deps change
+            if (renderTaskRef.current) {
+                renderTaskRef.current.cancel()
+                renderTaskRef.current = null
+            }
         }
     }, [pdfDoc, pageNumber, searchTerms, activeField, onPageChange])
 
