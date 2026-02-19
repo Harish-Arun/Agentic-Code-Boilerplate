@@ -170,7 +170,7 @@ function KeyerView() {
                         <PdfHighlightViewer
                             fileUrl={documentUrl}
                             activeField={activeField}
-                            activeSignature={activeSignatureDetection}
+                            activeSignature={activeField ? null : activeSignatureDetection}
                             focusPage={activeField?.data?.bounding_box?.page || activeSignatureDetection?.bounding_box?.page || 1}
                         />
                         <div style={{ marginTop: 'var(--spacing-md)', textAlign: 'center' }}>
@@ -208,7 +208,7 @@ function KeyerView() {
                                     signatureDetections={signatureDetections}
                                     signatureResults={[]}
                                     selectedIndex={selectedSigIndex}
-                                    onSelectSignature={setSelectedSigIndex}
+                                    onSelectSignature={(idx) => { setSelectedSigIndex(idx); setActiveField(null) }}
                                 />
                             </div>
                         )}
