@@ -3,17 +3,58 @@ import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useRole } from '../contexts/RoleContext'
 
-// Role-to-queue status mapping
-const ROLE_QUEUE_STATUS = {
+// What each role's primary action status is (the HITL pause point for that role)
+const ROLE_PRIMARY_STATUS = {
     keyer:         'PENDING_KEYER',
     authenticator: 'PENDING_AUTH',
-    verifier:      'PENDING_VERIFIER'
+    verifier:      'PENDING_VERIFIER',
+}
+
+// Full set of statuses each role is permitted to see — enforced client-side too
+//
+// Keyer:         INGESTED      - trigger AI processing
+//                PROCESSING    - monitor AI extraction progress
+//                EXTRACTED     - legacy alias for PENDING_KEYER (old DB docs)
+//                PENDING_KEYER - main HITL queue (graph paused; keyer reviews & corrects)
+//                REJECTED      - legacy rejected docs returned for rework
+//
+// Authenticator: PENDING_AUTH  - main HITL queue (graph paused; authenticate signatures)
+//                AUTHENTICATED - legacy alias for PENDING_AUTH (old DB docs)
+//
+// Verifier:      PENDING_VERIFIER - main HITL queue (graph paused; final sign-off)
+//                CONFIRMED        - verifier accepted (visible for tracking)
+const ROLE_ALLOWED_STATUSES = {
+    keyer:         ['INGESTED', 'PROCESSING', 'EXTRACTED', 'PENDING_KEYER', 'REJECTED'],
+    authenticator: ['PENDING_AUTH', 'AUTHENTICATED'],
+    verifier:      ['PENDING_VERIFIER', 'CONFIRMED'],
+}
+
+// Human-readable filter options per role
+const ROLE_FILTER_OPTIONS = {
+    keyer: [
+        { value: 'PENDING_KEYER', label: 'Pending Keyer Review' },
+        { value: 'INGESTED',      label: 'Ingested' },
+        { value: 'PROCESSING',    label: 'Processing' },
+        { value: 'EXTRACTED',     label: 'Extracted (legacy)' },
+        { value: 'REJECTED',      label: 'Returned / Rejected' },
+        { value: '',              label: 'All (my phase)' },
+    ],
+    authenticator: [
+        { value: 'PENDING_AUTH',  label: 'Pending Authentication' },
+        { value: 'AUTHENTICATED', label: 'Authenticated (legacy)' },
+        { value: '',              label: 'All (my phase)' },
+    ],
+    verifier: [
+        { value: 'PENDING_VERIFIER', label: 'Pending Verification' },
+        { value: 'CONFIRMED',        label: 'Confirmed' },
+        { value: '',                 label: 'All (my phase)' },
+    ],
 }
 
 const ROLE_QUEUE_LABELS = {
-    keyer:         'Keyer Queue - Extraction Review',
-    authenticator: 'Authenticator Queue - Signature Authentication',
-    verifier:      'Verifier Queue - Final Review'
+    keyer:         'Keyer Queue — Data Extraction & Review',
+    authenticator: 'Authenticator Queue — Signature Authentication',
+    verifier:      'Verifier Queue — Final Verification & Approval',
 }
 
 // Fallback sample data shown when API is unreachable
@@ -22,7 +63,7 @@ const SAMPLE_DOCUMENTS = [
         id: 'DOC-001',
         source: 'manual',
         uploaded_by: 'john.smith',
-        status: 'VERIFIED',
+        status: 'PENDING_KEYER',
         raw_file_path: '/uploads/payment_instruction_001.pdf',
         created_at: '2026-01-29T10:30:00Z',
         updated_at: '2026-01-29T11:45:00Z',
@@ -42,7 +83,7 @@ const SAMPLE_DOCUMENTS = [
         id: 'DOC-003',
         source: 'manual',
         uploaded_by: 'jane.doe',
-        status: 'EXTRACTED',
+        status: 'INGESTED',
         raw_file_path: '/uploads/payment_instruction_003.pdf',
         created_at: '2026-01-29T11:30:00Z',
         updated_at: '2026-01-29T11:30:00Z',
@@ -52,7 +93,7 @@ const SAMPLE_DOCUMENTS = [
         id: 'DOC-004',
         source: 'manual',
         uploaded_by: 'john.smith',
-        status: 'AUTHENTICATED',
+        status: 'PENDING_AUTH',
         raw_file_path: '/uploads/payment_instruction_004.pdf',
         created_at: '2026-01-28T09:00:00Z',
         updated_at: '2026-01-28T10:15:00Z',
@@ -62,42 +103,54 @@ const SAMPLE_DOCUMENTS = [
         id: 'DOC-005',
         source: 'network_drive',
         uploaded_by: 'service_account',
-        status: 'CONFIRMED',
+        status: 'PENDING_VERIFIER',
         raw_file_path: '/uploads/payment_instruction_005.pdf',
         created_at: '2026-01-27T14:00:00Z',
         updated_at: '2026-01-27T16:30:00Z',
+        feedback: {}
+    },
+    {
+        id: 'DOC-006',
+        source: 'manual',
+        uploaded_by: 'jane.doe',
+        status: 'CONFIRMED',
+        raw_file_path: '/uploads/payment_instruction_006.pdf',
+        created_at: '2026-01-27T14:00:00Z',
+        updated_at: '2026-01-27T17:00:00Z',
         feedback: {}
     }
 ]
 
 function DocumentList() {
     const { role } = useRole()
-    const [documents, setDocuments] = useState([])
+    const [allDocuments, setAllDocuments] = useState([])
     const [loading, setLoading] = useState(true)
-    const [statusFilter, setStatusFilter] = useState('')
+    const [statusFilter, setStatusFilter] = useState(() => ROLE_PRIMARY_STATUS[role] || '')
 
-    // Set default filter based on role
+    // When role changes: clear stale docs (shows spinner) and reset filter.
+    // The filter change then triggers the fetch effect below — no race condition.
     useEffect(() => {
-        setStatusFilter(ROLE_QUEUE_STATUS[role] || '')
+        setAllDocuments([])
+        setStatusFilter(ROLE_PRIMARY_STATUS[role] || '')
     }, [role])
 
+    // Fetch whenever the status filter changes (including after a role switch)
     useEffect(() => {
         fetchDocuments()
-        // Auto-refresh every 8 seconds so status changes appear without manual reload
         const interval = setInterval(fetchDocuments, 8000)
         return () => clearInterval(interval)
     }, [statusFilter])
 
     const fetchDocuments = async () => {
-        // Use silent refresh (no loading spinner after first load)
-        if (documents.length === 0) setLoading(true)
+        if (allDocuments.length === 0) setLoading(true)
         try {
+            // Fetch with the UI filter (or no filter to get all allowed statuses at once)
             const response = await api.getDocuments(statusFilter)
-            setDocuments(response.documents || SAMPLE_DOCUMENTS)
+            setAllDocuments(response.documents || SAMPLE_DOCUMENTS)
         } catch (err) {
             console.warn('API unavailable, showing sample data:', err.message)
-            if (documents.length === 0) {
-                setDocuments(SAMPLE_DOCUMENTS.filter(d =>
+            if (allDocuments.length === 0) {
+                setAllDocuments(SAMPLE_DOCUMENTS.filter(d =>
                     !statusFilter || d.status === statusFilter
                 ))
             }
@@ -105,12 +158,18 @@ function DocumentList() {
         setLoading(false)
     }
 
+    // Hard client-side enforcement: never show docs outside this role's allowed set
+    const allowed = ROLE_ALLOWED_STATUSES[role] || []
+    const documents = allDocuments.filter(d =>
+        allowed.length === 0 || allowed.includes(d.status)
+    )
+
     const handleProcess = async (docId) => {
         try {
             await api.processDocument(docId)
             fetchDocuments()
         } catch (err) {
-            setDocuments(prev => prev.map(d =>
+            setAllDocuments(prev => prev.map(d =>
                 d.id === docId ? { ...d, status: 'PROCESSING' } : d
             ))
         }
@@ -138,7 +197,7 @@ function DocumentList() {
                 updated_at: new Date().toISOString(),
                 feedback: {}
             }
-            setDocuments(prev => [newDoc, ...prev])
+            setAllDocuments(prev => [newDoc, ...prev])
         }
     }
 
@@ -176,7 +235,7 @@ function DocumentList() {
         return path.split('/').pop()
     }
 
-    const queueStatus = ROLE_QUEUE_STATUS[role]
+    const queueStatus = ROLE_PRIMARY_STATUS[role]
     const inQueueCount = documents.filter(d => d.status === queueStatus).length
     const processingCount = documents.filter(d => d.status === 'PROCESSING').length
     const completedCount = documents.filter(d => ['CONFIRMED', 'APPROVED', 'DISPATCHED'].includes(d.status)).length
@@ -195,16 +254,11 @@ function DocumentList() {
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
-                        style={{ width: '180px' }}
+                        style={{ width: '220px' }}
                     >
-                        <option value="">All Statuses</option>
-                        <option value="INGESTED">Ingested</option>
-                        <option value="PROCESSING">Processing</option>
-                        <option value="PENDING_KEYER">Pending Keyer</option>
-                        <option value="PENDING_AUTH">Pending Authenticator</option>
-                        <option value="PENDING_VERIFIER">Pending Verifier</option>
-                        <option value="CONFIRMED">Confirmed</option>
-                        <option value="REJECTED">Rejected</option>
+                        {(ROLE_FILTER_OPTIONS[role] || [{ value: '', label: 'All Statuses' }]).map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                     </select>
                     <button
                         className="btn btn-primary"

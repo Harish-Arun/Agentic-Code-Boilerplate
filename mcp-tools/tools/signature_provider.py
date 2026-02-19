@@ -10,7 +10,8 @@ Folder structure:
   data/reference/
     ├── CUST001.png       # Customer ID maps directly to filename
     ├── CUST002.jpg
-    └── john_smith.png    # Also supports name-based lookup
+    ├── john_smith.png    # Also supports name-based lookup
+    └── ref_1.txt         # Pre-encoded Base64 blob (PNG/JPEG auto-detected)
 """
 from typing import Dict, Any, Optional, List
 from fastmcp import FastMCP

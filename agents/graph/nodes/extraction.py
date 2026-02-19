@@ -47,6 +47,11 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
         print(f"Document path: {state.document_path}")
         print("="*80 + "\n")
         
+        # Collect all MCP results inside context without raising — raising inside the
+        # async context manager causes anyio to wrap the exception in ExceptionGroup.
+        extraction_result = None
+        validation_result = None
+
         async with get_mcp_client() as mcp:
             # Step 1: Extract payment fields via MCP
             state.add_history("extraction", "calling_mcp_extract", {
@@ -55,77 +60,79 @@ async def extraction_node(state: AgentState, config: AppConfig) -> AgentState:
             }, agent="extraction_agent")
 
             print("✅ MCP connection established, calling extract_payment_fields...\n")
-            
+
             extraction_result = await call_tool_on_session(mcp, "extract_payment_fields", {
                 "document_path": state.document_path
             })
 
-            processing_time = int((time.time() - start_time) * 1000)
+            if extraction_result.get("success"):
+                # Step 2: Validate extraction via MCP (only if extraction succeeded)
+                raw_payment = extraction_result["extracted_payment"]
+                validation_result = await call_tool_on_session(mcp, "validate_extraction", {
+                    "extracted_fields": json.dumps(raw_payment)
+                })
 
-            if not extraction_result.get("success"):
-                error_msg = extraction_result.get("error", "Extraction failed")
-                print(f"\n❌ EXTRACTION FAILED")
-                print(f"Error: {error_msg}")
-                print(f"Full extraction result: {json.dumps(extraction_result, indent=2)}\n")
-                raise RuntimeError(error_msg)
+        # MCP context exited cleanly — now raise or process results
+        processing_time = int((time.time() - start_time) * 1000)
 
-            # Convert response to ExtractedPayment model
-            raw_payment = extraction_result["extracted_payment"]
-            extracted_payment = _convert_mcp_response(raw_payment)
-            model_used = extraction_result.get("model_used", "")
-            thinking_metadata = extraction_result.get("thinking", {})
-            
-            # DEBUG: Log extracted fields
+        if not extraction_result or not extraction_result.get("success"):
+            error_msg = extraction_result.get("error", "Extraction failed") if extraction_result else "No result from MCP"
+            print(f"\n❌ EXTRACTION FAILED")
+            print(f"Error: {error_msg}")
+            print(f"Full extraction result: {json.dumps(extraction_result, indent=2)}\n")
+            raise RuntimeError(error_msg or "Extraction failed (no error details)")
+
+        # Convert response to ExtractedPayment model
+        raw_payment = extraction_result["extracted_payment"]
+        extracted_payment = _convert_mcp_response(raw_payment)
+        model_used = extraction_result.get("model_used", "")
+        thinking_metadata = extraction_result.get("thinking", {})
+
+        # DEBUG: Log extracted fields
+        print("\n" + "="*80)
+        print("💰 EXTRACTION NODE - Fields Extracted")
+        print("="*80)
+        print(json.dumps(raw_payment, indent=2, default=str))
+        print(f"\nConverted to model with {_count_fields(extracted_payment)} non-null fields")
+
+        # DEBUG: Log thinking metadata if available
+        if thinking_metadata:
             print("\n" + "="*80)
-            print("💰 EXTRACTION NODE - Fields Extracted")
+            print("🧠 THINKING TRACES")
             print("="*80)
-            import json
-            print(json.dumps(raw_payment, indent=2, default=str))
-            print(f"\nConverted to model with {_count_fields(extracted_payment)} non-null fields")
-            
-            # DEBUG: Log thinking metadata if available
-            if thinking_metadata:
-                print("\n" + "="*80)
-                print("🧠 THINKING TRACES")
-                print("="*80)
-                print(f"Thoughts Token Count: {thinking_metadata.get('thoughts_token_count')}")
-                print(f"Total Token Count: {thinking_metadata.get('total_token_count')}")
-                if thinking_metadata.get('thoughts'):
-                    print(f"Thought Summaries: {len(thinking_metadata.get('thoughts'))} thoughts")
-                    for i, thought in enumerate(thinking_metadata.get('thoughts', [])[:3], 1):
-                        print(f"  {i}. {thought[:100]}...")
-            print("="*80 + "\n")
+            print(f"Thoughts Token Count: {thinking_metadata.get('thoughts_token_count')}")
+            print(f"Total Token Count: {thinking_metadata.get('total_token_count')}")
+            if thinking_metadata.get('thoughts'):
+                print(f"Thought Summaries: {len(thinking_metadata.get('thoughts'))} thoughts")
+                for i, thought in enumerate(thinking_metadata.get('thoughts', [])[:3], 1):
+                    print(f"  {i}. {thought[:100]}...")
+        print("="*80 + "\n")
 
-            # Step 2: Validate extraction via MCP
-            validation_result = await call_tool_on_session(mcp, "validate_extraction", {
-                "extracted_fields": json.dumps(raw_payment)
-            })
+        if validation_result and not validation_result.get("valid", True):
+            state.add_history("extraction", "validation_warning", {
+                "issues": validation_result.get("issues", [])
+            }, agent="challenger_agent", notes=validation_result.get("notes"))
 
-            if not validation_result.get("valid", True):
-                state.add_history("extraction", "validation_warning", {
-                    "issues": validation_result.get("issues", [])
-                }, agent="challenger_agent", notes=validation_result.get("notes"))
+        # Record successful attempt
+        attempt = ExtractionAttempt(
+            attempt_number=attempt_number,
+            success=True,
+            extracted_payment=extracted_payment,
+            model_used=model_used,
+            processing_time_ms=processing_time,
+            raw_response=str(raw_payment)[:2000],
+            thoughts=thinking_metadata.get("thoughts"),
+            thoughts_token_count=thinking_metadata.get("thoughts_token_count"),
+            thinking_budget_used=thinking_metadata.get("thinking_budget_used")
+        )
+        state.add_extraction_attempt(attempt)
 
-            # Record successful attempt
-            attempt = ExtractionAttempt(
-                attempt_number=attempt_number,
-                success=True,
-                extracted_payment=extracted_payment,
-                model_used=model_used,
-                processing_time_ms=processing_time,
-                raw_response=str(raw_payment)[:2000],
-                thoughts=thinking_metadata.get("thoughts"),
-                thoughts_token_count=thinking_metadata.get("thoughts_token_count"),
-                thinking_budget_used=thinking_metadata.get("thinking_budget_used")
-            )
-            state.add_extraction_attempt(attempt)
-
-            state.add_history("extraction", "completed", {
-                "attempt": attempt_number,
-                "success": True,
-                "fields_extracted": _count_fields(extracted_payment),
-                "processing_time_ms": processing_time
-            }, agent="extraction_agent")
+        state.add_history("extraction", "completed", {
+            "attempt": attempt_number,
+            "success": True,
+            "fields_extracted": _count_fields(extracted_payment),
+            "processing_time_ms": processing_time
+        }, agent="extraction_agent")
 
     except Exception as e:
         import traceback

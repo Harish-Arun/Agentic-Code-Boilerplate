@@ -205,9 +205,13 @@ def register_extraction_tools(mcp: FastMCP, config: AppConfig):
             }
 
         except Exception as e:
+            import traceback
+            error_msg = str(e) or f"{type(e).__name__} (no message)"
+            print(f"\n❌ [EXTRACTION TOOL] Exception: {type(e).__name__}: {error_msg}")
+            print(traceback.format_exc())
             return {
                 "success": False,
-                "error": str(e),
+                "error": f"{type(e).__name__}: {error_msg}",
                 "extracted_payment": None,
                 "model_used": config.llm.gemini.model
             }
